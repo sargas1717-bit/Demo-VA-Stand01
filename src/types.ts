@@ -16,7 +16,7 @@ export type MeshType = "clasico" | "biolum" | "cyber" | "plexus" | "fuego" | "el
 /**
  * Tipos de filtros comerciales de producto (Comercial).
  */
-export type FilterType = "lentes" | "orejas" | "sombrero" | "rastro" | "todo" | "limpiar";
+export type FilterType = "lentes" | "orejas" | "sombrero" | "rastro" | "todo" | "limpiar" | "arte";
 
 /**
  * Estructuras de coordenadas en 3D para análisis biométrico.

@@ -40,6 +40,7 @@ export function FiltersModule({
     { id: "orejas" as FilterType, emoji: "🐰", label: "Conejo", desc: "Orejas animadas, nariz rosa y bigotes 3D" },
     { id: "sombrero" as FilterType, emoji: "🎩", label: "Sombrero Copa", desc: "Sombrero de mago elegante con cinta de satín" },
     { id: "rastro" as FilterType, emoji: "💫", label: "Rastro Luminoso", desc: "Rastro arcoíris 3D de alta intensidad y lluvia de destellos al moverte" },
+    { id: "arte" as FilterType, emoji: "🎨", label: "Arte Clásico", desc: "Patrones artísticos generativos: Pop, Puntillismo, Óleo" },
     { id: "todo" as FilterType, emoji: "✨", label: "Todo Junto", desc: "Aplica de forma simultánea todos los filtros comerciales incluyendo el rastro" },
     { id: "limpiar" as FilterType, emoji: "❌", label: "Limpiar", desc: "Elimina todos los filtros cosméticos de la pantalla" },
   ];

@@ -106,6 +106,10 @@ export function Workspace({
   const activeCyberThemeRef = useRef(1);
   useEffect(() => { activeCyberThemeRef.current = activeCyberTheme; }, [activeCyberTheme]);
 
+  const [activeArteTheme, setActiveArteTheme] = useState(0);
+  const activeArteThemeRef = useRef(0);
+  useEffect(() => { activeArteThemeRef.current = activeArteTheme; }, [activeArteTheme]);
+
   // Estado del menú / lobby interno de juegos en el canvas y barra de energía
   const [inGameLobby, setInGameLobby] = useState(true);
   const inGameLobbyRef = useRef(true);
@@ -490,6 +494,89 @@ export function Workspace({
   };
 
   // --- SECCIÓN: ALGORITMOS DE DIBUJO E INTERPRETACIÓN ---
+
+  // --- CREADORES DE PATRONES ARTE ---
+  const createHalftonePattern = (ctx: CanvasRenderingContext2D, dotColor: string, bgColor: string, size: number) => {
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const ctx2 = c.getContext('2d');
+    if (!ctx2) return null;
+    ctx2.fillStyle = bgColor;
+    ctx2.fillRect(0, 0, size, size);
+    ctx2.fillStyle = dotColor;
+    ctx2.beginPath();
+    ctx2.arc(size/2, size/2, size * 0.35, 0, Math.PI * 2);
+    ctx2.fill();
+    return ctx.createPattern(c, 'repeat');
+  };
+
+  const createPointillismPattern = (ctx: CanvasRenderingContext2D, c1: string, c2: string, c3: string, bgColor: string) => {
+    const c = document.createElement('canvas');
+    c.width = 16; c.height = 16;
+    const ctx2 = c.getContext('2d');
+    if (!ctx2) return null;
+    ctx2.fillStyle = bgColor;
+    ctx2.fillRect(0, 0, 16, 16);
+    
+    const drawDot = (x: number, y: number, color: string) => {
+        ctx2.fillStyle = color;
+        ctx2.beginPath(); ctx2.arc(x, y, 2.5, 0, Math.PI*2); ctx2.fill();
+    };
+    
+    drawDot(4, 4, c1); drawDot(12, 12, c1);
+    drawDot(12, 4, c2); drawDot(4, 12, c2);
+    drawDot(8, 8, c3);
+    return ctx.createPattern(c, 'repeat');
+  };
+
+  // --- FUNCIONES DE DIBUJO ARTE ---
+  const fillPath = (ctx: CanvasRenderingContext2D, landmarks: any[], connectionArray: any[], fillStyle: any, width: number, height: number) => {
+    if (!landmarks || !connectionArray) return;
+    ctx.beginPath();
+    for (let i = 0; i < connectionArray.length; i++) {
+        const pt = landmarks[connectionArray[i][0]];
+        if (!pt) continue;
+        if (i === 0) ctx.moveTo((1 - pt.x) * width, pt.y * height);
+        else ctx.lineTo((1 - pt.x) * width, pt.y * height);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+  };
+
+  const strokePath = (ctx: CanvasRenderingContext2D, landmarks: any[], connectionArray: any[], color: string, lineWidth: number, width: number, height: number) => {
+    if (!landmarks || !connectionArray) return;
+    ctx.beginPath();
+    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = color;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < connectionArray.length; i++) {
+        const pt = landmarks[connectionArray[i][0]];
+        if (!pt) continue;
+        if (i === 0) ctx.moveTo((1 - pt.x) * width, pt.y * height);
+        else ctx.lineTo((1 - pt.x) * width, pt.y * height);
+    }
+    ctx.stroke();
+  };
+
+  const strokeDottedPath = (ctx: CanvasRenderingContext2D, landmarks: any[], connectionArray: any[], color: string, dotSize: number, gapSize: number, width: number, height: number) => {
+    if (!landmarks || !connectionArray) return;
+    ctx.beginPath();
+    ctx.lineWidth = dotSize;
+    ctx.strokeStyle = color;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.setLineDash([0, gapSize]);
+    for (let i = 0; i < connectionArray.length; i++) {
+        const pt = landmarks[connectionArray[i][0]];
+        if (!pt) continue;
+        if (i === 0) ctx.moveTo((1 - pt.x) * width, pt.y * height);
+        else ctx.lineTo((1 - pt.x) * width, pt.y * height);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
 
   // Lentes de Sol con efecto espejo
   const drawSunglasses = (ctx: CanvasRenderingContext2D, leftEye: { x: number; y: number }, rightEye: { x: number; y: number }, distance: number, angle: number) => {
@@ -1405,7 +1492,7 @@ export function Workspace({
         const rightButtons = [
           { id: "lentes", emoji: "👓", label: "Lentes" },
           { id: "orejas", emoji: "🐰", label: "Conejo" },
-          { id: "sombrero", emoji: "🎩", label: "Gorr." },
+          { id: "arte", emoji: "🎨", label: "Arte" },
           { id: "todo", emoji: "✨", label: "Todo" },
           { id: "limpiar", emoji: "❌", label: "Limp." },
         ];
@@ -1478,13 +1565,13 @@ export function Workspace({
         if (selectedMeshRef.current === "plexus") {
           CYBER_THEMES.forEach((theme, idx) => {
             const btnX = (width / 2) * (0.10 + idx * 0.20);
-            const btnY = height - 50; // ⬇️ Reubicado en la parte inferior como se solicitó
-            const btnR = 14;
+            const btnY = height - 85; // Movidos más arriba para que la mano no se salga de cámara
+            const btnR = 18; // Más grandes para interactuar mejor
 
             let isHovered = false;
             if (hasPointer) {
               const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
-              if (dist < btnR + 10) isHovered = true; 
+              if (dist < btnR + 12) isHovered = true; 
             }
 
             const hoverId = `cyber_theme_${idx}`;
@@ -1533,6 +1620,74 @@ export function Workspace({
             ctx.font = "bold 8px Inter";
             ctx.textAlign = "center";
             ctx.fillText(theme.name.split(" ")[0], btnX, btnY - btnR - 6); // Arriba del botón para que no se corte
+            ctx.restore();
+          });
+        }
+
+        // --- BOTONES SECUNDARIOS DE TEMAS ARTE ---
+        if (selectedFilterRef.current === "arte") {
+          const ARTE_THEMES = [
+            { name: "Arte Pop", color: "236, 72, 153" },
+            { name: "Puntillismo", color: "16, 185, 129" },
+            { name: "Óleo", color: "245, 158, 11" },
+          ];
+          ARTE_THEMES.forEach((theme, idx) => {
+            const btnX = width / 2 + (width / 2) * (0.25 + idx * 0.25);
+            const btnY = height - 85;
+            const btnR = 18;
+
+            let isHovered = false;
+            if (hasPointer) {
+              const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
+              if (dist < btnR + 12) isHovered = true; 
+            }
+
+            const hoverId = `arte_theme_${idx}`;
+            const hoverMap = hoverTimersRef.current;
+            if (isHovered) {
+              hoverMap[hoverId] = Math.min((hoverMap[hoverId] || 0) + 1, 35);
+              if (hoverMap[hoverId] === 35 && activeArteThemeRef.current !== idx) {
+                setActiveArteTheme(idx);
+                activeArteThemeRef.current = idx;
+                playSuccessSound();
+              }
+            } else {
+              hoverMap[hoverId] = Math.max((hoverMap[hoverId] || 0) - 1.5, 0);
+            }
+
+            const active = activeArteThemeRef.current === idx;
+            ctx.save();
+            ctx.shadowColor = active ? `rgba(${theme.color}, 0.8)` : "rgba(0,0,0,0.5)";
+            ctx.shadowBlur = active ? 12 : 4;
+            ctx.fillStyle = active
+              ? `rgba(${theme.color}, 0.95)`
+              : isHovered
+              ? "rgba(30, 41, 59, 0.85)"
+              : "rgba(15, 23, 42, 0.65)";
+            ctx.strokeStyle = active ? "#ffffff" : `rgba(${theme.color}, 0.4)`;
+            ctx.lineWidth = 1.5;
+
+            ctx.beginPath();
+            ctx.arc(btnX, btnY, btnR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Anillo progreso circular
+            if (hoverMap[hoverId] > 0) {
+              const progress = hoverMap[hoverId] / 35;
+              ctx.strokeStyle = `rgb(${theme.color})`;
+              ctx.lineWidth = 2.5;
+              ctx.beginPath();
+              ctx.arc(btnX, btnY, btnR + 3, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+              ctx.stroke();
+            }
+
+            // Etiqueta
+            ctx.fillStyle = active ? "#ffffff" : "rgba(255, 255, 255, 0.6)";
+            ctx.font = "bold 8px Inter";
+            ctx.textAlign = "center";
+            ctx.fillText(theme.name, btnX, btnY - btnR - 6);
             ctx.restore();
           });
         }
@@ -2314,6 +2469,134 @@ export function Workspace({
           const activeConejo = filterType === "orejas" || filterType === "todo";
           const activeGorro = filterType === "sombrero" || filterType === "todo";
           const activeRastro = filterType === "rastro" || filterType === "todo";
+          const activeArte = filterType === "arte";
+
+          if (activeArte) {
+            const w = window as any;
+            const F_OVAL = w.FACEMESH_FACE_OVAL || [];
+            const F_LEYE = w.FACEMESH_LEFT_EYE || [];
+            const F_REYE = w.FACEMESH_RIGHT_EYE || [];
+            const F_LIPS = w.FACEMESH_LIPS || [];
+            const F_LBRW = w.FACEMESH_LEFT_EYEBROW || [];
+            const F_RBRW = w.FACEMESH_RIGHT_EYEBROW || [];
+            const F_TESS = w.FACEMESH_TESSELATION || [];
+            const F_LIRIS = w.FACEMESH_LEFT_IRIS || [];
+            const F_RIRIS = w.FACEMESH_RIGHT_IRIS || [];
+
+            const isFemale = fIndex % 2 === 0;
+            const isMale = !isFemale;
+            const arteThemeIdx = activeArteThemeRef.current;
+
+            if (arteThemeIdx === 0) {
+              // --- ARTE POP (Ben-Day Dots) ---
+              const dotColor = isFemale ? '#ec4899' : '#3b82f6';
+              const bgColor = isFemale ? '#fdf2f8' : '#eff6ff';
+              const lipColor = isFemale ? '#e11d48' : '#1e3a8a';
+              const eyeShadow = isFemale ? '#818cf8' : '#fbbf24';
+
+              const pattern = createHalftonePattern(ctx, dotColor, bgColor, 12);
+              if (pattern) fillPath(ctx, face, F_OVAL, pattern, width, height);
+              
+              // Sombra de ojos dramática pop art
+              const lTop = face[F_LBRW[0][0]], lBot = face[F_LEYE[0][0]];
+              if (lTop && lBot) {
+                  ctx.fillStyle = eyeShadow;
+                  ctx.beginPath();
+                  ctx.moveTo((1 - lTop.x) * width, lTop.y * height);
+                  ctx.lineTo((1 - lBot.x) * width, lBot.y * height - 10);
+                  ctx.arc((1 - lBot.x) * width, lBot.y * height, 20, 0, Math.PI);
+                  ctx.fill();
+              }
+
+              strokePath(ctx, face, F_OVAL, '#0f172a', 3, width, height); 
+              fillPath(ctx, face, F_LEYE, '#ffffff', width, height);
+              fillPath(ctx, face, F_REYE, '#ffffff', width, height);
+              strokePath(ctx, face, F_LEYE, '#0f172a', 3, width, height);
+              strokePath(ctx, face, F_REYE, '#0f172a', 3, width, height);
+              fillPath(ctx, face, F_LIPS, lipColor, width, height);
+              strokePath(ctx, face, F_LIPS, '#0f172a', 3, width, height);
+              fillPath(ctx, face, F_LBRW, '#0f172a', width, height);
+              fillPath(ctx, face, F_RBRW, '#0f172a', width, height);
+              
+              if (F_LIRIS.length) {
+                  fillPath(ctx, face, F_LIRIS, isFemale ? '#1e90ff' : '#2ed573', width, height);
+                  fillPath(ctx, face, F_RIRIS, isFemale ? '#1e90ff' : '#2ed573', width, height);
+                  strokePath(ctx, face, F_LIRIS, '#0f172a', 2, width, height);
+                  strokePath(ctx, face, F_RIRIS, '#0f172a', 2, width, height);
+              }
+            } else if (arteThemeIdx === 1) {
+              // --- PUNTILLISMO ---
+              let bgBase, dot1, dot2, dot3, lipColor, eyeColor;
+              if (isFemale) {
+                  bgBase = '#fff0f5'; dot1 = '#ff1493'; dot2 = '#00ced1'; dot3 = '#ffd700'; 
+                  lipColor = '#dc143c'; eyeColor = '#191970';
+              } else {
+                  bgBase = '#f5f5dc'; dot1 = '#000080'; dot2 = '#8b0000'; dot3 = '#2e8b57'; 
+                  lipColor = '#8b4513'; eyeColor = '#000000';
+              }
+
+              const mainPattern = createPointillismPattern(ctx, dot1, dot2, dot3, bgBase);
+              if (mainPattern) fillPath(ctx, face, F_OVAL, mainPattern, width, height);
+
+              fillPath(ctx, face, F_LEYE, '#ffffff', width, height);
+              fillPath(ctx, face, F_REYE, '#ffffff', width, height);
+              
+              strokeDottedPath(ctx, face, F_OVAL, dot2, 4, 8, width, height);
+              strokeDottedPath(ctx, face, F_LIPS, lipColor, 4, 6, width, height);
+              strokeDottedPath(ctx, face, F_LBRW, eyeColor, 5, 5, width, height);
+              strokeDottedPath(ctx, face, F_RBRW, eyeColor, 5, 5, width, height);
+              strokeDottedPath(ctx, face, F_LEYE, eyeColor, 3, 5, width, height);
+              strokeDottedPath(ctx, face, F_REYE, eyeColor, 3, 5, width, height);
+
+              const noseLine = [[168, 6], [6, 197], [197, 195], [195, 5], [5, 4]];
+              strokeDottedPath(ctx, face, noseLine, dot2, 4, 8, width, height);
+
+              if (F_LIRIS.length) {
+                  const irisPattern = createPointillismPattern(ctx, eyeColor, '#000', dot1, 'transparent');
+                  if (irisPattern) {
+                      fillPath(ctx, face, F_LIRIS, irisPattern, width, height);
+                      fillPath(ctx, face, F_RIRIS, irisPattern, width, height);
+                  }
+              }
+            } else if (arteThemeIdx === 2) {
+              // --- ÓLEO ---
+              let palette = isFemale 
+                  ? ['#ff007f', '#00e5ff', '#ffea00', '#ff5e00', '#d500f9', '#ffffff'] 
+                  : ['#ff3d00', '#2962ff', '#d50000', '#00c853', '#ffab00', '#3e2723'];
+
+              fillPath(ctx, face, F_OVAL, '#212121', width, height); 
+
+              ctx.save();
+              for (let i = 0; i < F_TESS.length; i++) {
+                  const triangle = F_TESS[i];
+                  const pt1 = face[triangle[0]];
+                  const pt2 = face[triangle[1]];
+                  if (!pt1 || !pt2) continue;
+
+                  const colorIdx = i % palette.length;
+                  const espColor = palette[colorIdx];
+
+                  ctx.beginPath();
+                  ctx.moveTo((1 - pt1.x) * width, pt1.y * height);
+                  ctx.lineTo((1 - pt2.x) * width, pt2.y * height);
+                  ctx.strokeStyle = espColor;
+                  ctx.lineWidth = 4 + (i % 3); 
+                  ctx.lineCap = 'round';
+                  ctx.lineJoin = 'bevel';
+                  ctx.stroke();
+
+                  if (i % 4 === 0) {
+                      ctx.beginPath();
+                      ctx.moveTo((1 - pt1.x) * width + 1, pt1.y * height + 1);
+                      ctx.lineTo((1 - pt2.x) * width + 1, pt2.y * height + 1);
+                      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                      ctx.lineWidth = 1;
+                      ctx.stroke();
+                  }
+              }
+              ctx.restore();
+            }
+          }
 
           if (activeLentes) {
             drawSunglasses(ctx, leftEyeRef, rightEyeRef, eyeDist, angle);

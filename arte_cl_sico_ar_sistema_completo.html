@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Filtros AR - Arte Clásico con Auto Género</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Librerías de MediaPipe (Malla 3D ultrarrápida) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <!-- Librería Face-API.js (Detección de género en segundo plano) -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+    <style>
+        body {
+            background-color: #0f172a;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 4/3;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            border: 1px solid #334155;
+            background-color: #1e293b;
+        }
+        video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 1;
+        }
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 2;
+        }
+        .btn-filtro {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-filtro:hover {
+            transform: translateY(-3px);
+            filter: brightness(1.1);
+        }
+        .btn-filtro:active {
+            transform: translateY(0);
+        }
+        .btn-activo {
+            background: linear-gradient(135deg, #f59e0b, #ea580c);
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .btn-inactivo {
+            background-color: #334155;
+            color: #cbd5e1;
+            font-weight: 500;
+            border: 1px solid #475569;
+        }
+        .loader {
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid #f59e0b;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #loading { transition: opacity 0.5s ease; }
+        .status-badge {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid #334155;
+            transition: all 0.3s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center py-8 px-4">
+
+    <div class="text-center mb-6">
+        <h1 class="text-4xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 mb-3 tracking-tight">
+            Arte Clásico AR
+        </h1>
+        <p class="text-slate-400 text-sm md:text-base max-w-lg mx-auto">
+            Máscaras 3D en tiempo real. Cero lag.
+        </p>
+    </div>
+
+    <div id="container" class="canvas-container flex justify-center items-center mb-6">
+        <div id="loading" class="absolute z-50 flex flex-col items-center bg-slate-900 w-full h-full justify-center">
+            <div class="loader mb-4"></div>
+            <p id="loading-text" class="text-sm font-medium text-orange-400 animate-pulse">Cargando modelos de IA (1/2)...</p>
+        </div>
+
+        <!-- Badge Inteligente -->
+        <div id="gender-status" class="status-badge absolute top-4 left-4 z-50 px-4 py-2 rounded-full text-sm font-bold text-white flex items-center gap-2">
+            <span id="badge-icon">🔍</span> 
+            <span id="badge-text">Analizando rostros...</span>
+        </div>
+
+        <video id="input_video" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <div class="flex flex-wrap justify-center gap-3 md:gap-4 px-4 w-full max-w-3xl">
+        <button id="btn-popart" class="btn-filtro btn-activo px-6 py-3 rounded-xl text-sm md:text-base w-full sm:w-auto flex-1" onclick="setFilter('popart')">
+            Arte Pop (Ben-Day)
+        </button>
+        <button id="btn-puntillismo" class="btn-filtro btn-inactivo px-6 py-3 rounded-xl text-sm md:text-base w-full sm:w-auto flex-1" onclick="setFilter('puntillismo')">
+            Puntillismo Óptico
+        </button>
+        <button id="btn-oleo" class="btn-filtro btn-inactivo px-6 py-3 rounded-xl text-sm md:text-base w-full sm:w-auto flex-1" onclick="setFilter('oleo')">
+            Óleo / Espátula
+        </button>
+        <button id="btn-none" class="btn-filtro btn-inactivo px-6 py-3 rounded-xl text-sm md:text-base w-full sm:w-auto flex-1" onclick="setFilter('none')">
+            Original
+        </button>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const loadingElement = document.getElementById('loading');
+        const loadingText = document.getElementById('loading-text');
+        const containerElement = document.getElementById('container');
+        const badgeIcon = document.getElementById('badge-icon');
+        const badgeText = document.getElementById('badge-text');
+
+        let currentFilter = 'popart';
+        let isVideoInitialized = false;
+
+        // --- SISTEMA MULTIUSUARIO DE GÉNERO ---
+        let lastDetections = [];
+        
+        async function detectGendersLoop() {
+            if (currentFilter === 'none' || !videoElement || videoElement.paused) return;
+            try {
+                const detections = await faceapi.detectAllFaces(videoElement, new faceapi.TinyFaceDetectorOptions()).withAgeAndGender();
+                lastDetections = detections.map(d => ({
+                    box: d.detection.box,
+                    gender: d.gender 
+                }));
+                
+                if (lastDetections.length > 0) {
+                    const males = lastDetections.filter(d => d.gender === 'male').length;
+                    const females = lastDetections.filter(d => d.gender === 'female').length;
+                    badgeIcon.innerText = "🎨";
+                    badgeText.innerText = `Paletas activas: ${males} Hombres, ${females} Mujeres`;
+                } else {
+                    badgeIcon.innerText = "🔍";
+                    badgeText.innerText = "Buscando rostros...";
+                }
+            } catch (error) {
+                console.warn("Error background FaceAPI:", error);
+            }
+        }
+
+        // Emparejar Malla 3D con Género 2D
+        function getGenderForFace(landmarks, width, height) {
+            if (lastDetections.length === 0) return null;
+            
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for (let pt of landmarks) {
+                minX = Math.min(minX, pt.x * width); maxX = Math.max(maxX, pt.x * width);
+                minY = Math.min(minY, pt.y * height); maxY = Math.max(maxY, pt.y * height);
+            }
+            const cx = (minX + maxX) / 2;
+            const cy = (minY + maxY) / 2;
+
+            let closestDist = Infinity;
+            let closestGender = null;
+            for (let d of lastDetections) {
+                const vRatioX = width / videoElement.videoWidth;
+                const vRatioY = height / videoElement.videoHeight;
+                
+                const dcx = (d.box.x + d.box.width / 2) * vRatioX;
+                const dcy = (d.box.y + d.box.height / 2) * vRatioY;
+                
+                const dist = Math.hypot(cx - dcx, cy - dcy);
+                if (dist < closestDist) {
+                    closestDist = dist;
+                    closestGender = d.gender;
+                }
+            }
+            if (closestDist > width * 0.4) return null;
+            return closestGender;
+        }
+
+        // --- CREADORES DE PATRONES ---
+        function createHalftonePattern(dotColor, bgColor, size) {
+            const c = document.createElement('canvas');
+            c.width = size; c.height = size;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, size, size);
+            ctx.fillStyle = dotColor;
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size * 0.35, 0, Math.PI * 2);
+            ctx.fill();
+            return canvasCtx.createPattern(c, 'repeat');
+        }
+
+        function createPointillismPattern(c1, c2, c3, bgColor) {
+            const c = document.createElement('canvas');
+            c.width = 16; c.height = 16;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, 16, 16);
+            
+            const drawDot = (x, y, color) => {
+                ctx.fillStyle = color;
+                ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI*2); ctx.fill();
+            };
+            
+            drawDot(4, 4, c1); drawDot(12, 12, c1);
+            drawDot(12, 4, c2); drawDot(4, 12, c2);
+            drawDot(8, 8, c3);
+            return canvasCtx.createPattern(c, 'repeat');
+        }
+
+        // --- FUNCIONES DE DIBUJO ---
+        function fillPath(ctx, landmarks, connectionArray, fillStyle) {
+            if (!landmarks || !connectionArray) return;
+            ctx.beginPath();
+            for (let i = 0; i < connectionArray.length; i++) {
+                const pt = landmarks[connectionArray[i][0]];
+                if (i === 0) ctx.moveTo(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height);
+                else ctx.lineTo(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height);
+            }
+            ctx.closePath();
+            ctx.fillStyle = fillStyle;
+            ctx.fill();
+        }
+
+        function strokePath(ctx, landmarks, connectionArray, color, lineWidth) {
+            if (!landmarks || !connectionArray) return;
+            ctx.beginPath();
+            ctx.lineWidth = lineWidth;
+            ctx.strokeStyle = color;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            for (let i = 0; i < connectionArray.length; i++) {
+                const pt = landmarks[connectionArray[i][0]];
+                if (i === 0) ctx.moveTo(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height);
+                else ctx.lineTo(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height);
+            }
+            ctx.stroke();
+        }
+
+        // NUEVA FUNCIÓN: Dibuja puntos estables (sin lag ni parpadeo) usando Líneas Punteadas Nativas
+        function strokeDottedPath(ctx, landmarks, connectionArray, color, dotSize, gapSize) {
+            if (!landmarks || !connectionArray) return;
+            ctx.beginPath();
+            ctx.lineWidth = dotSize;
+            ctx.strokeStyle = color;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round'; // Esto hace que el guion sea un punto circular
+            ctx.setLineDash([0, gapSize]); // Patrón de punteado nativo
+            for (let i = 0; i < connectionArray.length; i++) {
+                const pt = landmarks[connectionArray[i][0]];
+                if (i === 0) ctx.moveTo(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height);
+                else ctx.lineTo(pt.x * ctx.canvas.width, pt.y * ctx.canvas.height);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]); // Restablecer para no afectar a otros dibujos
+        }
+
+        function setFilter(filterName) {
+            currentFilter = filterName;
+            document.querySelectorAll('.btn-filtro').forEach(btn => {
+                btn.classList.remove('btn-activo');
+                btn.classList.add('btn-inactivo');
+            });
+            document.getElementById(`btn-${filterName}`).classList.remove('btn-inactivo');
+            document.getElementById(`btn-${filterName}`).classList.add('btn-activo');
+        }
+
+        // --- BUCLE PRINCIPAL DE RENDERIZADO (60FPS) ---
+        function onResults(results) {
+            if (loadingElement.style.opacity !== '0') {
+                loadingElement.style.opacity = '0';
+                setTimeout(() => loadingElement.style.display = 'none', 500);
+            }
+
+            if (!isVideoInitialized && videoElement.videoWidth > 0) {
+                canvasElement.width = videoElement.videoWidth;
+                canvasElement.height = videoElement.videoHeight;
+                containerElement.style.aspectRatio = `${videoElement.videoWidth} / ${videoElement.videoHeight}`;
+                isVideoInitialized = true;
+            }
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && currentFilter !== 'none') {
+                for (const landmarks of results.multiFaceLandmarks) {
+                    
+                    const gender = getGenderForFace(landmarks, canvasElement.width, canvasElement.height);
+                    const isFemale = (gender === 'female');
+                    const isMale = (gender === 'male');
+
+                    if (currentFilter === 'popart') {
+                        // --- ARTE POP ---
+                        let baseColor, shadowDot, shadowBg, lipColor, eyeShadowColor;
+                        if (isFemale) {
+                            baseColor = '#ffe3e0'; shadowDot = '#ff4757'; shadowBg = '#ff6b81'; lipColor = '#ff0000'; eyeShadowColor = '#1e90ff';
+                        } else if (isMale) {
+                            baseColor = '#f5cd79'; shadowDot = '#e15f41'; shadowBg = '#f3a683'; lipColor = '#cf6a87'; eyeShadowColor = null;
+                        } else {
+                            baseColor = '#f1dbce'; shadowDot = '#e66767'; shadowBg = '#ea8685'; lipColor = '#e66767'; eyeShadowColor = null;
+                        }
+
+                        fillPath(canvasCtx, landmarks, FACEMESH_FACE_OVAL, baseColor);
+
+                        const rightShadowArea = [ [10,10], [338,338], [297,297], [332,332], [284,284], [251,251], [389,389], [356,356], [454,454], [323,323], [361,361], [288,288], [397,397], [365,365], [379,379], [378,378], [400,400], [377,377], [152,152], [9,9], [8,8], [10,10] ];
+                        const popPattern = createHalftonePattern(shadowDot, shadowBg, 10);
+                        fillPath(canvasCtx, landmarks, rightShadowArea, popPattern);
+
+                        const chinShadow = [ [152,152], [148,148], [176,176], [149,149], [150,150], [136,136], [172,172], [58,58], [132,132], [93,93], [164,164], [152,152] ];
+                        fillPath(canvasCtx, landmarks, chinShadow, popPattern);
+
+                        if (eyeShadowColor) {
+                            const leftEyeShadow = [ [33,33], [246,246], [161,161], [160,160], [159,159], [158,158], [157,157], [173,173], [133,133], [155,155], [154,154], [153,153], [145,145], [144,144], [163,163], [7,7], [33,33] ];
+                            fillPath(canvasCtx, landmarks, leftEyeShadow, eyeShadowColor);
+                            const rightEyeShadow = [ [263,263], [466,466], [388,388], [387,387], [386,386], [385,385], [384,384], [398,398], [362,362], [382,382], [381,381], [380,380], [374,374], [373,373], [390,390], [249,249], [263,263] ];
+                            fillPath(canvasCtx, landmarks, rightEyeShadow, eyeShadowColor);
+                        }
+
+                        strokePath(canvasCtx, landmarks, FACEMESH_FACE_OVAL, '#000', 4); 
+                        fillPath(canvasCtx, landmarks, FACEMESH_LEFT_EYE, '#fff');
+                        fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, '#fff');
+                        strokePath(canvasCtx, landmarks, FACEMESH_LEFT_EYE, '#000', isFemale ? 5 : 3);
+                        strokePath(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, '#000', isFemale ? 5 : 3);
+                        fillPath(canvasCtx, landmarks, FACEMESH_LIPS, lipColor);
+                        strokePath(canvasCtx, landmarks, FACEMESH_LIPS, '#000', 3);
+                        fillPath(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, '#000');
+                        fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, '#000');
+                        strokePath(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, '#000', isMale ? 5 : 2);
+                        strokePath(canvasCtx, landmarks, [[129, 98], [98, 97], [97, 2], [2, 326], [326, 327], [327, 358]], '#000', 3);
+
+                        if (typeof FACEMESH_LEFT_IRIS !== 'undefined') {
+                            fillPath(canvasCtx, landmarks, FACEMESH_LEFT_IRIS, isFemale ? '#1e90ff' : '#2ed573');
+                            fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_IRIS, isFemale ? '#1e90ff' : '#2ed573');
+                            strokePath(canvasCtx, landmarks, FACEMESH_LEFT_IRIS, '#000', 2);
+                            strokePath(canvasCtx, landmarks, FACEMESH_RIGHT_IRIS, '#000', 2);
+                            const lC = landmarks[468], rC = landmarks[473];
+                            canvasCtx.beginPath();
+                            canvasCtx.arc(lC.x * canvasElement.width, lC.y * canvasElement.height, canvasElement.width * 0.015, 0, Math.PI*2);
+                            canvasCtx.arc(rC.x * canvasElement.width, rC.y * canvasElement.height, canvasElement.width * 0.015, 0, Math.PI*2);
+                            canvasCtx.fillStyle = '#000'; canvasCtx.fill();
+                        }
+
+                    } else if (currentFilter === 'puntillismo') {
+                        // --- PUNTILLISMO ESTABLE (CERO LAG) ---
+                        // En lugar de calcular puntos al azar cada milisegundo (lo que causaba lag),
+                        // usamos un patrón base y definimos las facciones trazando LÍNEAS PUNTEADAS.
+                        
+                        let bgBase, dot1, dot2, dot3, lipColor, eyeColor;
+                        if (isFemale) {
+                            bgBase = '#fff0f5'; dot1 = '#ff1493'; dot2 = '#00ced1'; dot3 = '#ffd700'; 
+                            lipColor = '#dc143c'; eyeColor = '#191970';
+                        } else if (isMale) {
+                            bgBase = '#f5f5dc'; dot1 = '#000080'; dot2 = '#8b0000'; dot3 = '#2e8b57'; 
+                            lipColor = '#8b4513'; eyeColor = '#000000';
+                        } else {
+                            bgBase = '#faf0e6'; dot1 = '#ff8c00'; dot2 = '#4682b4'; dot3 = '#9acd32'; 
+                            lipColor = '#cd5c5c'; eyeColor = '#4682b4';
+                        }
+
+                        // 1. Patrón base para la piel (estable)
+                        const mainPattern = createPointillismPattern(dot1, dot2, dot3, bgBase);
+                        fillPath(canvasCtx, landmarks, FACEMESH_FACE_OVAL, mainPattern);
+
+                        // 2. Facciones Fijas (Ojos y Labios Base)
+                        fillPath(canvasCtx, landmarks, FACEMESH_LEFT_EYE, '#ffffff');
+                        fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, '#ffffff');
+                        
+                        // 3. DEFINICIÓN DE FACCIONES CON PUNTOS ESTABLES
+                        // strokeDottedPath(contexto, puntos, ruta, color, grosorDelPunto, separacionEntrePuntos)
+                        
+                        // Contorno de la cara
+                        strokeDottedPath(canvasCtx, landmarks, FACEMESH_FACE_OVAL, dot2, 4, 8);
+                        
+                        // Labios muy definidos
+                        strokeDottedPath(canvasCtx, landmarks, FACEMESH_LIPS, lipColor, 4, 6);
+                        
+                        // Ojos y Cejas (Puntos oscuros más seguidos)
+                        strokeDottedPath(canvasCtx, landmarks, FACEMESH_LEFT_EYEBROW, eyeColor, 5, 5);
+                        strokeDottedPath(canvasCtx, landmarks, FACEMESH_RIGHT_EYEBROW, eyeColor, 5, 5);
+                        strokeDottedPath(canvasCtx, landmarks, FACEMESH_LEFT_EYE, eyeColor, 3, 5);
+                        strokeDottedPath(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, eyeColor, 3, 5);
+
+                        // Nariz
+                        const noseLine = [[168, 6], [6, 197], [197, 195], [195, 5], [5, 4]];
+                        strokeDottedPath(canvasCtx, landmarks, noseLine, dot2, 4, 8);
+
+                        // Iris
+                        if (typeof FACEMESH_LEFT_IRIS !== 'undefined') {
+                            const irisPattern = createPointillismPattern(eyeColor, '#000', dot1, 'transparent');
+                            fillPath(canvasCtx, landmarks, FACEMESH_LEFT_IRIS, irisPattern);
+                            fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_IRIS, irisPattern);
+                        }
+
+                    } else if (currentFilter === 'oleo') {
+                        // --- ÓLEO VIBRANTE ESTABLE ---
+                        // Inspirado en la imagen subida. Trazos de pintura vibrante.
+                        // El color depende del ÍNDICE del triángulo, por lo que NUNCA parpadea aunque te muevas.
+                        
+                        let palette;
+                        if (isFemale) {
+                            // Tonos neón vibrantes: Fucsia, Cyan, Amarillo
+                            palette = ['#ff007f', '#00e5ff', '#ffea00', '#ff5e00', '#d500f9', '#ffffff'];
+                        } else if (isMale) {
+                            // Tonos óleo pesados y saturados: Naranja, Azul oscuro, Rojo, Verde
+                            palette = ['#ff3d00', '#2962ff', '#d50000', '#00c853', '#ffab00', '#3e2723'];
+                        } else {
+                            palette = ['#ff6d00', '#00bfa5', '#ffd600', '#c51162'];
+                        }
+
+                        // Base oscura unificadora
+                        fillPath(canvasCtx, landmarks, FACEMESH_FACE_OVAL, '#212121'); 
+
+                        // Trazos de espátula superpuestos
+                        for (let i = 0; i < FACEMESH_TESSELATION.length; i++) {
+                            const triangle = FACEMESH_TESSELATION[i];
+                            const pt1 = landmarks[triangle[0]];
+                            const pt2 = landmarks[triangle[1]];
+
+                            // El color es fijo para cada polígono. Adiós al parpadeo.
+                            const color = palette[i % palette.length];
+
+                            canvasCtx.beginPath();
+                            canvasCtx.moveTo(pt1.x * canvasElement.width, pt1.y * canvasElement.height);
+                            canvasCtx.lineTo(pt2.x * canvasElement.width, pt2.y * canvasElement.height);
+                            
+                            // Trazo grueso simulando pintura al óleo
+                            canvasCtx.lineWidth = 14; 
+                            canvasCtx.strokeStyle = color;
+                            canvasCtx.lineCap = 'round';
+                            canvasCtx.globalAlpha = 0.85; 
+                            canvasCtx.stroke();
+                        }
+                        canvasCtx.globalAlpha = 1.0;
+
+                        // Detalles para asegurar que los ojos y boca resalten
+                        const detailColor = '#000000';
+                        fillPath(canvasCtx, landmarks, FACEMESH_LEFT_EYE, '#ffffff');
+                        fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, '#ffffff');
+                        strokePath(canvasCtx, landmarks, FACEMESH_LEFT_EYE, detailColor, 5);
+                        strokePath(canvasCtx, landmarks, FACEMESH_RIGHT_EYE, detailColor, 5);
+                        
+                        fillPath(canvasCtx, landmarks, FACEMESH_LIPS, palette[0]); // Color principal en labios
+                        strokePath(canvasCtx, landmarks, FACEMESH_LIPS, detailColor, 4);
+
+                        if (typeof FACEMESH_LEFT_IRIS !== 'undefined') {
+                            fillPath(canvasCtx, landmarks, FACEMESH_LEFT_IRIS, detailColor);
+                            fillPath(canvasCtx, landmarks, FACEMESH_RIGHT_IRIS, detailColor);
+                        }
+                    }
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        // --- INICIALIZACIÓN ---
+        async function initializeApp() {
+            try {
+                const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+                    faceapi.nets.ageGenderNet.loadFromUri(MODEL_URL)
+                ]);
+                loadingText.innerText = "Cargando Malla 3D (2/2)...";
+
+                setInterval(detectGendersLoop, 1000);
+
+                const faceMesh = new FaceMesh({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+                }});
+                
+                faceMesh.setOptions({
+                    maxNumFaces: 4, 
+                    refineLandmarks: true,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
+                });
+                
+                faceMesh.onResults(onResults);
+
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await faceMesh.send({image: videoElement});
+                    },
+                    width: 1280,
+                    height: 720
+                });
+                
+                await camera.start();
+            } catch (err) {
+                console.error("Error de inicialización: ", err);
+                loadingElement.innerHTML = `
+                    <div class="text-red-500 text-center px-4">
+                        <p class="font-bold text-lg mb-2">Error al iniciar</p>
+                        <p class="text-sm">Por favor, permite el acceso a la cámara y asegúrate de no tener bloqueadores de scripts activos.</p>
+                    </div>
+                `;
+            }
+        }
+
+        initializeApp();
+    </script>
+</body>
+</html>
