@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TFLite Prober / Tester</title>
+  <script src="https://cdn.tailwindcss.com" crossorigin="anonymous"></script>
+  <!-- TensorFlow.js core -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js" crossorigin="anonymous"></script>
+  <!-- TensorFlow.js TFLite backend -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-tflite@0.0.1-alpha.10/dist/tf-tflite.min.js" crossorigin="anonymous"></script>
+  <style>
+    body { background-color: #0A0A0B; color: #E0E0E0; font-family: monospace; padding: 2rem; }
+    .log-box { background: #1C1C1E; border: 1px solid #2A2A2C; padding: 1rem; border-radius: 0.5rem; height: 300px; overflow-y: auto; white-space: pre-wrap; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="max-w-4xl mx-auto flex flex-col gap-6">
+    <h1 class="text-2xl font-bold text-emerald-400">TFLite Model Prober</h1>
+    <p class="text-sm text-zinc-400">Este script carga los modelos localmente, lee su topología interna y prueba distintas resoluciones y normalizaciones para descubrir cómo funcionan.</p>
+    
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs font-bold mb-2">Probar Imagen (Opcional):</label>
+        <div class="flex gap-2">
+          <input type="file" id="imageInput" accept="image/*" class="text-sm border border-zinc-700 p-1 rounded" />
+          <button id="btnCamera" class="px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-xs font-bold rounded border border-zinc-600">Usar Cámara</button>
+        </div>
+        <img id="preview" src="" class="mt-4 max-w-[200px] hidden rounded border border-zinc-700" />
+        <video id="videoPreview" autoplay muted playsinline class="mt-4 max-w-[200px] hidden rounded border border-zinc-700"></video>
+      </div>
+      <div>
+        <button id="btnRun" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded">
+          Cargar Modelos y Analizar
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4 mt-4">
+      <div>
+        <h3 class="font-bold text-zinc-300 mb-2">Logs GenderClass</h3>
+        <div id="log-gender" class="log-box"></div>
+      </div>
+      <div>
+        <h3 class="font-bold text-zinc-300 mb-2">Logs AgeClass</h3>
+        <div id="log-age" class="log-box"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const logGender = (msg) => { document.getElementById('log-gender').innerHTML += msg + '\n'; };
+    const logAge = (msg) => { document.getElementById('log-age').innerHTML += msg + '\n'; };
+
+    // Configurar WASM de TFLite apuntando a nuestros binarios locales en /models/
+    tflite.setWasmPath('/models/');
+
+    const imageInput = document.getElementById('imageInput');
+    const preview = document.getElementById('preview');
+    const videoPreview = document.getElementById('videoPreview');
+    let testImageElement = null;
+
+    document.getElementById('btnCamera').addEventListener('click', async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        videoPreview.srcObject = stream;
+        videoPreview.style.display = 'block';
+        preview.style.display = 'none';
+        testImageElement = videoPreview;
+      } catch (err) {
+        alert("Error de cámara: " + err.message);
+      }
+    });
+
+    imageInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          preview.src = event.target.result;
+          preview.style.display = 'block';
+          videoPreview.style.display = 'none';
+          testImageElement = preview;
+        };
+        reader.readAsDataURL(e.target.files[0]);
+      }
+    });
+
+    document.getElementById('btnRun').addEventListener('click', async () => {
+      document.getElementById('log-gender').innerHTML = '';
+      document.getElementById('log-age').innerHTML = '';
+      
+      logGender("Iniciando análisis de GenderClass...");
+      logAge("Iniciando análisis de AgeClass...");
+
+      try {
+        logGender("Cargando modelo /models/GenderClass_06_03-20-08.tflite...");
+        const modelGender = await tflite.loadTFLiteModel('/models/GenderClass_06_03-20-08.tflite');
+        analyzeModel(modelGender, logGender, "Gender");
+
+        logAge("Cargando modelo /models/AgeClass_best_06_02-16-02.tflite...");
+        const modelAge = await tflite.loadTFLiteModel('/models/AgeClass_best_06_02-16-02.tflite');
+        analyzeModel(modelAge, logAge, "Age");
+
+      } catch (err) {
+        logGender("<span class='text-red-500'>Error fatal: " + err.message + "</span>");
+        logAge("<span class='text-red-500'>Error fatal: " + err.message + "</span>");
+      }
+    });
+
+    async function analyzeModel(model, logFn, modelName) {
+      logFn("✅ Modelo cargado exitosamente.");
+      
+      // 1. Analizar Shape
+      const inputs = model.inputs;
+      const outputs = model.outputs;
+      
+      logFn(`\n--- TOPOLOGÍA DEL MODELO ---`);
+      inputs.forEach((inp, i) => {
+        logFn(`Input [${i}]: shape = [${inp.shape.join(', ')}], dtype = ${inp.dtype}`);
+      });
+      outputs.forEach((out, i) => {
+        logFn(`Output [${i}]: shape = [${out.shape.join(', ')}], dtype = ${out.dtype}`);
+      });
+
+      // 2. Si hay imagen, probar inferencia
+      if (!testImageElement) {
+        logFn(`\n⚠️ No se ha subido imagen. Sube una foto (preferiblemente un rostro recortado) para probar la inferencia.`);
+        return;
+      }
+
+      const inputShape = inputs[0].shape; // Ej: [1, 224, 224, 3]
+      // TFLite shapes usually include batch dimension. We need height and width.
+      // Often shape is [1, width, height, 3] or [1, height, width, 3].
+      let targetHeight = 224, targetWidth = 224; 
+      
+      // Intentar adivinar la resolución desde el shape interno
+      const possibleDims = inputShape.filter(s => s > 3);
+      if (possibleDims.length >= 2) {
+        targetHeight = possibleDims[0];
+        targetWidth = possibleDims[1];
+      }
+      
+      logFn(`\n--- PRUEBA DE INFERENCIA ---`);
+      logFn(`Redimensionando imagen a ${targetWidth}x${targetHeight}...`);
+
+      // Prueba 1: Normalización 0 a 1
+      try {
+        logFn(`\nPrueba 1: Normalización de 0.0 a 1.0 (dividiendo por 255)`);
+        const tensor01 = tf.browser.fromPixels(testImageElement)
+          .resizeBilinear([targetHeight, targetWidth])
+          .expandDims(0)
+          .toFloat()
+          .div(255.0);
+        
+        const res01 = model.predict(tensor01);
+        const data01 = res01.dataSync();
+        logFn(`Salida cruda: [${Array.from(data01).map(n => n.toFixed(4)).join(', ')}]`);
+        
+        // Interpretar si es clasificación binaria
+        if (data01.length === 2 && modelName === "Gender") {
+          logFn(`-> Asumiendo [Mujer, Hombre] = ${(data01[0]*100).toFixed(1)}% / ${(data01[1]*100).toFixed(1)}%`);
+          logFn(`-> Asumiendo [Hombre, Mujer] = ${(data01[0]*100).toFixed(1)}% / ${(data01[1]*100).toFixed(1)}%`);
+        }
+        tf.dispose([tensor01, res01]);
+      } catch (err) {
+        logFn(`<span class='text-red-400'>Error en Prueba 1: ${err.message}</span>`);
+      }
+
+      // Prueba 2: Normalización -1 a 1
+      try {
+        logFn(`\nPrueba 2: Normalización de -1.0 a 1.0 ((pix/127.5)-1)`);
+        const tensor11 = tf.browser.fromPixels(testImageElement)
+          .resizeBilinear([targetHeight, targetWidth])
+          .expandDims(0)
+          .toFloat()
+          .div(127.5).sub(1);
+        
+        const res11 = model.predict(tensor11);
+        const data11 = res11.dataSync();
+        logFn(`Salida cruda: [${Array.from(data11).map(n => n.toFixed(4)).join(', ')}]`);
+        tf.dispose([tensor11, res11]);
+      } catch (err) {
+        logFn(`<span class='text-red-400'>Error en Prueba 2: ${err.message}</span>`);
+      }
+
+      // Prueba 3: Normalización 0 a 255 (Sin normalizar)
+      try {
+        logFn(`\nPrueba 3: Sin normalizar (0 a 255)`);
+        const tensor255 = tf.browser.fromPixels(testImageElement)
+          .resizeBilinear([targetHeight, targetWidth])
+          .expandDims(0)
+          .toFloat();
+        
+        const res255 = model.predict(tensor255);
+        const data255 = res255.dataSync();
+        logFn(`Salida cruda: [${Array.from(data255).map(n => n.toFixed(4)).join(', ')}]`);
+        tf.dispose([tensor255, res255]);
+      } catch (err) {
+        logFn(`<span class='text-red-400'>Error en Prueba 3: ${err.message}</span>`);
+      }
+    }
+  </script>
+</body>
+</html>

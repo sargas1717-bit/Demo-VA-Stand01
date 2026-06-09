@@ -46,6 +46,7 @@ interface WorkspaceProps {
   onSaveSample: (sample: Omit<SavedEmotion, "id" | "time" | "showCoords">) => void;
   onDeleteSample: (id: number) => void;
   detectionConfidence: number;
+  viewMode?: "ingenieria" | "comercial" | "ambos";
 }
 
 /**
@@ -66,6 +67,7 @@ export function Workspace({
   onSaveSample,
   onDeleteSample,
   detectionConfidence,
+  viewMode = "ambos",
 }: WorkspaceProps) {
   // --- ESTADOS LOCALES DE CONFIGURACIÓN ---
   const [selectedMesh, setSelectedMesh] = useState<MeshType>("cyber");
@@ -227,7 +229,12 @@ export function Workspace({
   const sliderSurpriseRatioRef = useRef(sliderSurpriseRatio);
 
   const selectedMeshRef = useRef(selectedMesh);
+  useEffect(() => { selectedMeshRef.current = selectedMesh; }, [selectedMesh]);
   const selectedFilterRef = useRef(selectedFilter);
+  useEffect(() => { selectedFilterRef.current = selectedFilter; }, [selectedFilter]);
+
+  const viewModeRef = useRef(viewMode);
+  useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
 
   // Objetos animados dentro del canvas
   const bubblesListRef = useRef<Bubble[]>([]);
@@ -238,6 +245,10 @@ export function Workspace({
 
   const gameActiveRef = useRef(gameActive);
   const scoreRef = useRef(score);
+
+  // Contador global para alternar paletas de colores cuando entra una nueva persona
+  const appearanceCounterRef = useRef<number>(0);
+  const previousFaceCountRef = useRef<number>(0);
 
   // Timers hover para los botones virtuales interactivos en Filtros
   const hoverTimersRef = useRef<{ [key: string]: number }>({
@@ -1415,36 +1426,42 @@ export function Workspace({
         ctx.fillStyle = "#ffffff";
         ctx.fillText("COMERCIAL", width - 110 + 47.5, 15 + 15);
 
-        // --- BOTONES VIRTUALES IZQUIERDOS (INGENIERÍA) ---
-        const leftButtons = [
-          { id: "clasico", emoji: "🧬", label: "Clásico" },
-          { id: "biolum", emoji: "🦠", label: "Biolum" },
-          { id: "cyber", emoji: "🤖", label: "Cyber" },
-          { id: "plexus", emoji: "💠", label: "Plexus" },
-          { id: "fuego", emoji: "🔥", label: "Fuego" },
-          { id: "electrico", emoji: "⚡", label: "Electro" },
-        ];
+        const vMode = viewModeRef.current;
 
-        leftButtons.forEach((btn, idx) => {
-          const btnX = (width / 2) * (0.10 + idx * 0.16);
-          const btnY = 50;
-          const btnR = 21;
+        // --- BOTONES VIRTUALES IZQUIERDOS (INGENIERÍA) ---
+        if (vMode === "ingenieria" || vMode === "ambos") {
+          const leftButtons = [
+            { id: "clasico", emoji: "🧬", label: "Clásico" },
+            { id: "biolum", emoji: "🦠", label: "Biolum" },
+            { id: "cyber", emoji: "🤖", label: "Cyber" },
+            { id: "plexus", emoji: "💠", label: "Plexus" },
+            { id: "fuego", emoji: "🔥", label: "Fuego" },
+            { id: "electrico", emoji: "⚡", label: "Electro" },
+          ];
+
+          const leftSideW = vMode === "ambos" ? width / 2 : width;
+
+          leftButtons.forEach((btn, idx) => {
+            const btnX = leftSideW * (0.08 + idx * 0.16);
+            const btnY = 50;
+            const btnR = 21;
 
           let isHovered = false;
           if (hasPointer) {
             const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
-            if (dist < btnR) isHovered = true;
+            if (dist < btnR + 20) isHovered = true; // Hitbox ampliado significativamente
           }
 
           const hoverMap = hoverTimersRef.current;
           if (isHovered) {
-            hoverMap[btn.id] = Math.min(hoverMap[btn.id] + 1, 35);
+            hoverMap[btn.id] = Math.min((hoverMap[btn.id] || 0) + 1, 35);
             if (hoverMap[btn.id] === 35 && selectedMeshRef.current !== btn.id) {
               setSelectedMesh(btn.id as MeshType);
+              selectedMeshRef.current = btn.id as MeshType;
               playSuccessSound();
             }
           } else {
-            hoverMap[btn.id] = Math.max(hoverMap[btn.id] - 1.5, 0);
+            hoverMap[btn.id] = Math.max((hoverMap[btn.id] || 0) - 1.5, 0);
           }
 
           // Dibujar circulo del botón
@@ -1487,91 +1504,99 @@ export function Workspace({
           }
           ctx.restore();
         });
+        }
 
         // --- BOTONES VIRTUALES DERECHOS (COMERCIAL) ---
-        const rightButtons = [
-          { id: "lentes", emoji: "👓", label: "Lentes" },
-          { id: "orejas", emoji: "🐰", label: "Conejo" },
-          { id: "arte", emoji: "🎨", label: "Arte" },
-          { id: "todo", emoji: "✨", label: "Todo" },
-          { id: "limpiar", emoji: "❌", label: "Limp." },
-        ];
+        if (vMode === "comercial" || vMode === "ambos") {
+          const rightButtons = [
+            { id: "lentes", emoji: "👓", label: "Lentes" },
+            { id: "orejas", emoji: "🐰", label: "Conejo" },
+            { id: "sombrero", emoji: "🎩", label: "Gorr." },
+            { id: "arte", emoji: "🎨", label: "Arte" },
+            { id: "todo", emoji: "✨", label: "Todo" },
+            { id: "limpiar", emoji: "❌", label: "Limp." },
+          ];
 
-        rightButtons.forEach((btn, idx) => {
-          const rightSideW = width / 2;
-          const btnX = width / 2 + rightSideW * (0.10 + idx * 0.20);
-          const btnY = 50;
-          const btnR = 21;
+          const rightSideW = vMode === "ambos" ? width / 2 : width;
+          const offsetX = vMode === "ambos" ? width / 2 : 0;
 
-          let isHovered = false;
-          if (hasPointer) {
-            const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
-            if (dist < btnR) isHovered = true;
-          }
-
-          const hoverMap = hoverTimersRef.current;
-          if (isHovered) {
-            hoverMap[btn.id] = Math.min(hoverMap[btn.id] + 1, 35);
-            if (hoverMap[btn.id] === 35 && selectedFilterRef.current !== btn.id) {
-              setSelectedFilter(btn.id as FilterType);
-              playSuccessSound();
-            }
-          } else {
-            hoverMap[btn.id] = Math.max(hoverMap[btn.id] - 1.5, 0);
-          }
-
-          // Dibujar circulo del botón
-          const active = selectedFilterRef.current === btn.id;
-          ctx.save();
-          ctx.shadowColor = active ? "rgba(236, 72, 153, 0.5)" : "rgba(0,0,0,0.3)";
-          ctx.shadowBlur = 8;
-          ctx.fillStyle = active
-            ? "rgba(236, 72, 153, 0.95)"
-            : isHovered
-            ? "rgba(30, 41, 59, 0.85)"
-            : "rgba(15, 23, 42, 0.65)";
-          ctx.strokeStyle = active ? "#ffffff" : "rgba(255,255,255,0.18)";
-          ctx.lineWidth = 2;
-
-          ctx.beginPath();
-          ctx.arc(btnX, btnY, btnR, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-          ctx.shadowBlur = 0;
-
-          // Dibujar emoji
-          ctx.fillStyle = "#ffffff";
-          ctx.font = "14px Inter";
-          ctx.fillText(btn.emoji, btnX, btnY + 4.5);
-
-          // Etiqueta
-          ctx.fillStyle = active ? "#f472b6" : "rgba(255, 255, 255, 0.75)";
-          ctx.font = "bold 8px Inter";
-          ctx.fillText(btn.label, btnX, btnY + btnR + 10);
-
-          // Anillo progreso circular de hover automático
-          if (hoverMap[btn.id] > 0) {
-            const progress = hoverMap[btn.id] / 35;
-            ctx.strokeStyle = "#10b981"; // emerald-500
-            ctx.lineWidth = 3.5;
-            ctx.beginPath();
-            ctx.arc(btnX, btnY, btnR + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
-            ctx.stroke();
-          }
-          ctx.restore();
-        });
-
-        // --- BOTONES SECUNDARIOS DE TEMAS PLEXUS ---
-        if (selectedMeshRef.current === "plexus") {
-          CYBER_THEMES.forEach((theme, idx) => {
-            const btnX = (width / 2) * (0.10 + idx * 0.20);
-            const btnY = height - 85; // Movidos más arriba para que la mano no se salga de cámara
-            const btnR = 18; // Más grandes para interactuar mejor
+          rightButtons.forEach((btn, idx) => {
+            const btnX = offsetX + rightSideW * (0.08 + idx * 0.16);
+            const btnY = 50;
+            const btnR = 21;
 
             let isHovered = false;
             if (hasPointer) {
               const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
-              if (dist < btnR + 12) isHovered = true; 
+              if (dist < btnR + 20) isHovered = true; // Hitbox ampliado significativamente
+            }
+
+            const hoverMap = hoverTimersRef.current;
+            if (isHovered) {
+              hoverMap[btn.id] = Math.min((hoverMap[btn.id] || 0) + 1, 35);
+              if (hoverMap[btn.id] === 35 && selectedFilterRef.current !== btn.id) {
+                setSelectedFilter(btn.id as FilterType);
+                selectedFilterRef.current = btn.id as FilterType;
+                playSuccessSound();
+              }
+            } else {
+              hoverMap[btn.id] = Math.max((hoverMap[btn.id] || 0) - 1.5, 0);
+            }
+
+            // Dibujar circulo del botón
+            const active = selectedFilterRef.current === btn.id;
+            ctx.save();
+            ctx.shadowColor = active ? "rgba(236, 72, 153, 0.5)" : "rgba(0,0,0,0.3)";
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = active
+              ? "rgba(236, 72, 153, 0.95)"
+              : isHovered
+              ? "rgba(30, 41, 59, 0.85)"
+              : "rgba(15, 23, 42, 0.65)";
+            ctx.strokeStyle = active ? "#ffffff" : "rgba(255,255,255,0.18)";
+            ctx.lineWidth = 2;
+
+            ctx.beginPath();
+            ctx.arc(btnX, btnY, btnR, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Dibujar emoji
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "14px Inter";
+            ctx.fillText(btn.emoji, btnX, btnY + 4.5);
+
+            // Etiqueta
+            ctx.fillStyle = active ? "#f472b6" : "rgba(255, 255, 255, 0.75)";
+            ctx.font = "bold 8px Inter";
+            ctx.fillText(btn.label, btnX, btnY + btnR + 10);
+
+            // Anillo progreso circular de hover automático
+            if (hoverMap[btn.id] > 0) {
+              const progress = hoverMap[btn.id] / 35;
+              ctx.strokeStyle = "#10b981"; // emerald-500
+              ctx.lineWidth = 3.5;
+              ctx.beginPath();
+              ctx.arc(btnX, btnY, btnR + 3.5, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * progress);
+              ctx.stroke();
+            }
+            ctx.restore();
+          });
+        }
+
+        // --- BOTONES SECUNDARIOS DE TEMAS PLEXUS ---
+        if ((vMode === "ingenieria" || vMode === "ambos") && selectedMeshRef.current === "plexus") {
+          const leftSideW = vMode === "ambos" ? width / 2 : width;
+          CYBER_THEMES.forEach((theme, idx) => {
+            const btnX = leftSideW * (0.10 + idx * 0.20);
+            const btnY = height - 120; // Movidos más arriba
+            const btnR = 20;
+
+            let isHovered = false;
+            if (hasPointer) {
+              const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
+              if (dist < btnR + 20) isHovered = true; 
             }
 
             const hoverId = `cyber_theme_${idx}`;
@@ -1625,21 +1650,24 @@ export function Workspace({
         }
 
         // --- BOTONES SECUNDARIOS DE TEMAS ARTE ---
-        if (selectedFilterRef.current === "arte") {
+        if ((vMode === "comercial" || vMode === "ambos") && selectedFilterRef.current === "arte") {
+          const rightSideW = vMode === "ambos" ? width / 2 : width;
+          const offsetX = vMode === "ambos" ? width / 2 : 0;
+
           const ARTE_THEMES = [
             { name: "Arte Pop", color: "236, 72, 153" },
             { name: "Puntillismo", color: "16, 185, 129" },
             { name: "Óleo", color: "245, 158, 11" },
           ];
           ARTE_THEMES.forEach((theme, idx) => {
-            const btnX = width / 2 + (width / 2) * (0.25 + idx * 0.25);
-            const btnY = height - 85;
-            const btnR = 18;
+            const btnX = offsetX + rightSideW * (0.25 + idx * 0.25);
+            const btnY = height - 120; // Movidos más arriba
+            const btnR = 20;
 
             let isHovered = false;
             if (hasPointer) {
               const dist = Math.sqrt(Math.pow(pointerX - btnX, 2) + Math.pow(pointerY - btnY, 2));
-              if (dist < btnR + 12) isHovered = true; 
+              if (dist < btnR + 20) isHovered = true; 
             }
 
             const hoverId = `arte_theme_${idx}`;
@@ -1698,6 +1726,12 @@ export function Workspace({
           const isMultiFace = Array.isArray(faceDataList[0]);
           const facesList = isMultiFace ? faceDataList : [faceDataList];
 
+          // Lógica para rotar colores de arte dinámicamente cada vez que aparece alguien nuevo
+          if (facesList.length > previousFaceCountRef.current) {
+            appearanceCounterRef.current += 1;
+          }
+          previousFaceCountRef.current = facesList.length;
+
           for (let fIndex = 0; fIndex < facesList.length; fIndex++) {
             const face = facesList[fIndex];
             const noseGlobal = { x: (1 - face[4].x) * width, y: face[4].y * height };
@@ -1719,12 +1753,17 @@ export function Workspace({
           const filterType = selectedFilterRef.current;
 
           // LADO DE INGENIERÍA (Izquierdo)
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, width / 2, height);
-          ctx.clip();
+          if (vMode === "ingenieria" || vMode === "ambos") {
+            ctx.save();
+            ctx.beginPath();
+            if (vMode === "ambos") {
+              ctx.rect(0, 0, width / 2, height);
+            } else {
+              ctx.rect(0, 0, width, height);
+            }
+            ctx.clip();
 
-          // A. Clásico - Malla Oficial de MediaPipe de Alta Fidelidad + Esqueleto de Manos Completo
+            // A. Clásico - Malla Oficial de MediaPipe de Alta Fidelidad + Esqueleto de Manos Completo
           if (meshType === "clasico") {
             // Dibujar lineas de la cara en una sola pasada para optima velocidad (Rendering Batching)
             ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
@@ -2446,15 +2485,21 @@ export function Workspace({
             });
           }
 
-          ctx.restore(); // Termina clipping izquierdo
+            ctx.restore(); // Termina clipping izquierdo
+          }
 
           // LADO DE PRODUCTO COMERCIAL (Derecho)
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(width / 2, 0, width / 2, height);
-          ctx.clip();
+          if (vMode === "comercial" || vMode === "ambos") {
+            ctx.save();
+            ctx.beginPath();
+            if (vMode === "ambos") {
+              ctx.rect(width / 2, 0, width / 2, height);
+            } else {
+              ctx.rect(0, 0, width, height);
+            }
+            ctx.clip();
 
-          const headTop = { x: (1 - face[10].x) * width, y: face[10].y * height };
+            const headTop = { x: (1 - face[10].x) * width, y: face[10].y * height };
           const nose = { x: (1 - face[4].x) * width, y: face[4].y * height };
 
           const dx = rightEyeRef.x - leftEyeRef.x;
@@ -2483,46 +2528,66 @@ export function Workspace({
             const F_LIRIS = w.FACEMESH_LEFT_IRIS || [];
             const F_RIRIS = w.FACEMESH_RIGHT_IRIS || [];
 
-            const isFemale = fIndex % 2 === 0;
+            // Asignación de género (paleta de colores) basada en las apariciones dinámicas
+            // (appearanceCounterRef.current + fIndex) % 2 asegura colores distintos para múltiples 
+            // personas simultáneas y que cambien al salir y entrar de cuadro.
+            const themeVariant = (appearanceCounterRef.current + fIndex) % 2;
+            const isFemale = themeVariant === 0;
             const isMale = !isFemale;
             const arteThemeIdx = activeArteThemeRef.current;
 
             if (arteThemeIdx === 0) {
               // --- ARTE POP (Ben-Day Dots) ---
-              const dotColor = isFemale ? '#ec4899' : '#3b82f6';
-              const bgColor = isFemale ? '#fdf2f8' : '#eff6ff';
-              const lipColor = isFemale ? '#e11d48' : '#1e3a8a';
-              const eyeShadow = isFemale ? '#818cf8' : '#fbbf24';
-
-              const pattern = createHalftonePattern(ctx, dotColor, bgColor, 12);
-              if (pattern) fillPath(ctx, face, F_OVAL, pattern, width, height);
-              
-              // Sombra de ojos dramática pop art
-              const lTop = face[F_LBRW[0][0]], lBot = face[F_LEYE[0][0]];
-              if (lTop && lBot) {
-                  ctx.fillStyle = eyeShadow;
-                  ctx.beginPath();
-                  ctx.moveTo((1 - lTop.x) * width, lTop.y * height);
-                  ctx.lineTo((1 - lBot.x) * width, lBot.y * height - 10);
-                  ctx.arc((1 - lBot.x) * width, lBot.y * height, 20, 0, Math.PI);
-                  ctx.fill();
+              let baseColor, shadowDot, shadowBg, lipColor, eyeShadowColor;
+              if (isFemale) {
+                  baseColor = '#ffe3e0'; shadowDot = '#ff4757'; shadowBg = '#ff6b81'; lipColor = '#ff0000'; eyeShadowColor = '#1e90ff';
+              } else if (isMale) {
+                  baseColor = '#f5cd79'; shadowDot = '#e15f41'; shadowBg = '#f3a683'; lipColor = '#cf6a87'; eyeShadowColor = null;
+              } else {
+                  baseColor = '#f1dbce'; shadowDot = '#e66767'; shadowBg = '#ea8685'; lipColor = '#e66767'; eyeShadowColor = null;
               }
 
-              strokePath(ctx, face, F_OVAL, '#0f172a', 3, width, height); 
-              fillPath(ctx, face, F_LEYE, '#ffffff', width, height);
-              fillPath(ctx, face, F_REYE, '#ffffff', width, height);
-              strokePath(ctx, face, F_LEYE, '#0f172a', 3, width, height);
-              strokePath(ctx, face, F_REYE, '#0f172a', 3, width, height);
+              fillPath(ctx, face, F_OVAL, baseColor, width, height);
+
+              const rightShadowArea = [ [10,10], [338,338], [297,297], [332,332], [284,284], [251,251], [389,389], [356,356], [454,454], [323,323], [361,361], [288,288], [397,397], [365,365], [379,379], [378,378], [400,400], [377,377], [152,152], [9,9], [8,8], [10,10] ];
+              const popPattern = createHalftonePattern(ctx, shadowDot, shadowBg, 10);
+              if (popPattern) {
+                fillPath(ctx, face, rightShadowArea, popPattern, width, height);
+                const chinShadow = [ [152,152], [148,148], [176,176], [149,149], [150,150], [136,136], [172,172], [58,58], [132,132], [93,93], [164,164], [152,152] ];
+                fillPath(ctx, face, chinShadow, popPattern, width, height);
+              }
+
+              if (eyeShadowColor) {
+                  const leftEyeShadow = [ [33,33], [246,246], [161,161], [160,160], [159,159], [158,158], [157,157], [173,173], [133,133], [155,155], [154,154], [153,153], [145,145], [144,144], [163,163], [7,7], [33,33] ];
+                  fillPath(ctx, face, leftEyeShadow, eyeShadowColor, width, height);
+                  const rightEyeShadow = [ [263,263], [466,466], [388,388], [387,387], [386,386], [385,385], [384,384], [398,398], [362,362], [382,382], [381,381], [380,380], [374,374], [373,373], [390,390], [249,249], [263,263] ];
+                  fillPath(ctx, face, rightEyeShadow, eyeShadowColor, width, height);
+              }
+              
+              strokePath(ctx, face, F_OVAL, '#000', 4, width, height); 
+              fillPath(ctx, face, F_LEYE, '#fff', width, height);
+              fillPath(ctx, face, F_REYE, '#fff', width, height);
+              strokePath(ctx, face, F_LEYE, '#000', isFemale ? 5 : 3, width, height);
+              strokePath(ctx, face, F_REYE, '#000', isFemale ? 5 : 3, width, height);
               fillPath(ctx, face, F_LIPS, lipColor, width, height);
-              strokePath(ctx, face, F_LIPS, '#0f172a', 3, width, height);
-              fillPath(ctx, face, F_LBRW, '#0f172a', width, height);
-              fillPath(ctx, face, F_RBRW, '#0f172a', width, height);
+              strokePath(ctx, face, F_LIPS, '#000', 3, width, height);
+              fillPath(ctx, face, F_LBRW, '#000', width, height);
+              fillPath(ctx, face, F_RBRW, '#000', width, height);
+              strokePath(ctx, face, F_LBRW, '#000', isMale ? 5 : 2, width, height);
+              strokePath(ctx, face, [[129, 98], [98, 97], [97, 2], [2, 326], [326, 327], [327, 358]], '#000', 3, width, height);
               
               if (F_LIRIS.length) {
                   fillPath(ctx, face, F_LIRIS, isFemale ? '#1e90ff' : '#2ed573', width, height);
                   fillPath(ctx, face, F_RIRIS, isFemale ? '#1e90ff' : '#2ed573', width, height);
-                  strokePath(ctx, face, F_LIRIS, '#0f172a', 2, width, height);
-                  strokePath(ctx, face, F_RIRIS, '#0f172a', 2, width, height);
+                  strokePath(ctx, face, F_LIRIS, '#000', 2, width, height);
+                  strokePath(ctx, face, F_RIRIS, '#000', 2, width, height);
+                  const lC = face[468], rC = face[473];
+                  if (lC && rC) {
+                    ctx.beginPath();
+                    ctx.arc((1 - lC.x) * width, lC.y * height, width * 0.015, 0, Math.PI*2);
+                    ctx.arc((1 - rC.x) * width, rC.y * height, width * 0.015, 0, Math.PI*2);
+                    ctx.fillStyle = '#000'; ctx.fill();
+                  }
               }
             } else if (arteThemeIdx === 1) {
               // --- PUNTILLISMO ---
@@ -2530,9 +2595,12 @@ export function Workspace({
               if (isFemale) {
                   bgBase = '#fff0f5'; dot1 = '#ff1493'; dot2 = '#00ced1'; dot3 = '#ffd700'; 
                   lipColor = '#dc143c'; eyeColor = '#191970';
-              } else {
+              } else if (isMale) {
                   bgBase = '#f5f5dc'; dot1 = '#000080'; dot2 = '#8b0000'; dot3 = '#2e8b57'; 
                   lipColor = '#8b4513'; eyeColor = '#000000';
+              } else {
+                  bgBase = '#faf0e6'; dot1 = '#ff8c00'; dot2 = '#4682b4'; dot3 = '#9acd32'; 
+                  lipColor = '#cd5c5c'; eyeColor = '#4682b4';
               }
 
               const mainPattern = createPointillismPattern(ctx, dot1, dot2, dot3, bgBase);
@@ -2560,9 +2628,14 @@ export function Workspace({
               }
             } else if (arteThemeIdx === 2) {
               // --- ÓLEO ---
-              let palette = isFemale 
-                  ? ['#ff007f', '#00e5ff', '#ffea00', '#ff5e00', '#d500f9', '#ffffff'] 
-                  : ['#ff3d00', '#2962ff', '#d50000', '#00c853', '#ffab00', '#3e2723'];
+              let palette;
+              if (isFemale) {
+                  palette = ['#ff007f', '#00e5ff', '#ffea00', '#ff5e00', '#d500f9', '#ffffff'];
+              } else if (isMale) {
+                  palette = ['#ff3d00', '#2962ff', '#d50000', '#00c853', '#ffab00', '#3e2723'];
+              } else {
+                  palette = ['#ff6d00', '#00bfa5', '#ffd600', '#c51162'];
+              }
 
               fillPath(ctx, face, F_OVAL, '#212121', width, height); 
 
@@ -2573,26 +2646,22 @@ export function Workspace({
                   const pt2 = face[triangle[1]];
                   if (!pt1 || !pt2) continue;
 
-                  const colorIdx = i % palette.length;
-                  const espColor = palette[colorIdx];
+                  const color = palette[i % palette.length];
 
                   ctx.beginPath();
                   ctx.moveTo((1 - pt1.x) * width, pt1.y * height);
                   ctx.lineTo((1 - pt2.x) * width, pt2.y * height);
-                  ctx.strokeStyle = espColor;
-                  ctx.lineWidth = 4 + (i % 3); 
+                  
+                  ctx.lineWidth = 14; 
+                  ctx.strokeStyle = color;
                   ctx.lineCap = 'round';
-                  ctx.lineJoin = 'bevel';
+                  ctx.lineJoin = 'round';
                   ctx.stroke();
 
-                  if (i % 4 === 0) {
-                      ctx.beginPath();
-                      ctx.moveTo((1 - pt1.x) * width + 1, pt1.y * height + 1);
-                      ctx.lineTo((1 - pt2.x) * width + 1, pt2.y * height + 1);
-                      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-                      ctx.lineWidth = 1;
-                      ctx.stroke();
-                  }
+                  // Brillo espatulado
+                  ctx.lineWidth = 4;
+                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                  ctx.stroke();
               }
               ctx.restore();
             }
@@ -2711,8 +2780,9 @@ export function Workspace({
           }
 
           ctx.restore(); // Termina clipping derecho
-          } // Fin bucle for de caras
-        }
+          } // Fin de if (vMode === comercial)
+        } // Fin bucle for de caras
+      } // Fin de if (faceData)
 
         // Puntero verde de la mano virtual para FILTERS
         if (hasPointer) {
