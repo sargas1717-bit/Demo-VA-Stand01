@@ -1,0 +1,1201 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+// ==========================================
+// CONSTANTES FACIALES - MEDIAPIPE DEFINITIONS
+// ==========================================
+const F_OVAL = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 
+  400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 
+  54, 103, 67, 109
+];
+
+const F_LEYE = [33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246];
+const F_REYE = [263, 249, 390, 373, 374, 380, 381, 382, 362, 398, 384, 385, 386, 387, 388, 466];
+
+const F_LIPS = [
+  78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 415, 310, 311, 312, 13, 82, 81, 80, 191
+];
+
+const F_LBRW = [70, 63, 105, 66, 107, 55, 65, 52, 53, 46];
+const F_RBRW = [300, 293, 334, 296, 336, 285, 295, 282, 283, 276];
+
+const F_LIRIS = [468, 469, 470, 471, 472];
+const F_RIRIS = [473, 474, 475, 476, 477];
+
+// Malla simplificada y optimizada de triangulación para evitar sobrecarga y superposiciones feas
+const F_TESS = [
+  [10, 338, 297], [10, 297, 332], [338, 297, 356], [10, 109, 67], [10, 67, 103], [109, 67, 21],
+  [21, 54, 103], [54, 103, 67], [103, 67, 332], [297, 332, 251], [332, 284, 251], [284, 251, 389],
+  [251, 389, 356], [389, 356, 454], [356, 454, 323], [454, 323, 361], [323, 361, 288], [361, 288, 397],
+  [288, 397, 365], [397, 365, 379], [365, 379, 378], [379, 378, 400], [378, 400, 377], [400, 377, 152],
+  [377, 152, 148], [152, 148, 176], [148, 176, 149], [176, 149, 150], [149, 150, 136], [150, 136, 172],
+  [136, 172, 58], [172, 58, 132], [58, 132, 93], [132, 93, 234], [93, 234, 127], [234, 127, 162],
+  [127, 162, 21], [162, 21, 54], [234, 93, 58], [58, 132, 172], [109, 21, 162], [10, 332, 103],
+  [103, 54, 21], [332, 297, 338], [338, 356, 389], [389, 251, 284], [361, 323, 454], [288, 361, 397],
+  [365, 397, 379], [378, 379, 400], [152, 377, 148], [176, 148, 149], [136, 150, 172], [132, 58, 93]
+];
+
+// Áreas de sombra simuladas para Arte Pop
+const POP_SHADOW_LEFT = [109, 67, 103, 54, 21, 162, 127, 234, 93, 132, 58, 136, 150, 149, 176, 148, 152];
+const POP_SHADOW_RIGHT = [338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152];
+
+export default function App() {
+  // --- Estados del Sistema ---
+  const [arteThemeIdx, setArteThemeIdx] = useState(0); // 0: Pop, 1: Puntillismo, 2: Óleo
+  const [popStyle, setPopStyle] = useState('dots'); // 'dots', 'hatch', 'warhol'
+  const [pointillismStyle, setPointillismStyle] = useState('impressionism'); // 'impressionism', 'geometric', 'radial'
+  const [paletteGender, setPaletteGender] = useState('female'); // 'female', 'male', 'else'
+  const [useCamera, setUseCamera] = useState(false);
+  const [showCanvasGrain, setShowCanvasGrain] = useState(true);
+  
+  // Parámetros artísticos modificables por el usuario
+  const [dotSize, setDotSize] = useState(11);
+  const [misregistration, setMisregistration] = useState(5); // Desfase de plancha de impresión
+  const [strokeWeight, setStrokeWeight] = useState(4);
+  const [oilThickness, setOilThickness] = useState(16);
+  const [oilRelief, setOilRelief] = useState(8);
+  const [pointillismDensity, setPointillismDensity] = useState(120);
+
+  // Estados de carga y error para MediaPipe
+  const [mpStatus, setMpStatus] = useState('Cargando simulador de arte...');
+  const [isTracking, setIsTracking] = useState(false);
+
+  // Referencias a elementos del DOM
+  const canvasRef = useRef(null);
+  const videoRef = useRef(null);
+  const requestRef = useRef(null);
+
+  // Referencia para guardar las coordenadas actuales de la cara (capturada o simulada)
+  const faceDataRef = useRef(null);
+  const simAngleRef = useRef(0);
+
+  // ==========================================
+  // FUNCIONES AUXILIARES INYECTADAS (REGLA 2)
+  // ==========================================
+  const fillPath = (ctx, face, indices, colorOrPattern, width, height, offsetX = 0, offsetY = 0) => {
+    if (!face || indices.length === 0) return;
+    ctx.beginPath();
+    const firstPt = face[indices[0]];
+    if (!firstPt) return;
+    ctx.moveTo((1 - firstPt.x) * width + offsetX, firstPt.y * height + offsetY);
+    for (let i = 1; i < indices.length; i++) {
+      const pt = face[indices[i]];
+      if (pt) {
+        ctx.lineTo((1 - pt.x) * width + offsetX, pt.y * height + offsetY);
+      }
+    }
+    ctx.closePath();
+    ctx.fillStyle = colorOrPattern;
+    ctx.fill();
+  };
+
+  const strokePath = (ctx, face, indices, color, thickness, width, height) => {
+    if (!face || indices.length === 0) return;
+    ctx.beginPath();
+    const firstPt = face[indices[0]];
+    if (!firstPt) return;
+    ctx.moveTo((1 - firstPt.x) * width, firstPt.y * height);
+    for (let i = 1; i < indices.length; i++) {
+      const pt = face[indices[i]];
+      if (pt) {
+        ctx.lineTo((1 - pt.x) * width, pt.y * height);
+      }
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thickness;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+
+  const strokeDottedPath = (ctx, face, indices, color, thickness, dotSpacing, width, height) => {
+    if (!face || indices.length === 0) return;
+    ctx.save();
+    ctx.beginPath();
+    const firstPt = face[indices[0]];
+    if (!firstPt) return;
+    ctx.moveTo((1 - firstPt.x) * width, firstPt.y * height);
+    for (let i = 1; i < indices.length; i++) {
+      const pt = face[indices[i]];
+      if (pt) {
+        ctx.lineTo((1 - pt.x) * width, pt.y * height);
+      }
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thickness;
+    ctx.setLineDash([thickness, dotSpacing]);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  // ==========================================
+  // NUEVAS FUNCIONES DE TEXTURA (PUNTILLISMO REAL)
+  // ==========================================
+  
+  // Rellena un polígono completo de forma densa usando recorte (Clipping Mask)
+  const fillWithDots = (ctx, face, indices, colors, density, maxRad, width, height) => {
+    if (!face || indices.length === 0) return;
+    
+    // 1. Calcular Caja Delimitadora para no esparcir puntos donde no van
+    let minX = width, maxX = 0, minY = height, maxY = 0;
+    indices.forEach(idx => {
+      const pt = face[idx];
+      if (pt) {
+        const px = (1 - pt.x) * width; const py = pt.y * height;
+        if (px < minX) minX = px; if (px > maxX) maxX = px;
+        if (py < minY) minY = py; if (py > maxY) maxY = py;
+      }
+    });
+    if(maxX === 0) return;
+
+    // 2. Crear máscara de recorte perfecta
+    ctx.save();
+    ctx.beginPath();
+    const firstPt = face[indices[0]];
+    ctx.moveTo((1 - firstPt.x) * width, firstPt.y * height);
+    for (let i = 1; i < indices.length; i++) {
+      const pt = face[indices[i]];
+      if (pt) ctx.lineTo((1 - pt.x) * width, pt.y * height);
+    }
+    ctx.closePath();
+    ctx.clip(); // <-- LA MAGIA: Ningún punto saldrá de la forma
+
+    // 3. Rellenar con densidad proporcional al área de la forma
+    const area = Math.abs((maxX - minX) * (maxY - minY));
+    const numDots = Math.max(10, Math.floor(area * (density / 10000)));
+
+    for (let i = 0; i < numDots; i++) {
+      const px = minX + Math.random() * (maxX - minX);
+      const py = minY + Math.random() * (maxY - minY);
+      ctx.fillStyle = colors[Math.floor(Math.random() * colors.length)];
+      ctx.beginPath();
+      // Puntos orgánicos con ligera variación de tamaño
+      ctx.arc(px, py, (maxRad * 0.4) + Math.random() * (maxRad * 0.6), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  };
+
+  // Dibuja un contorno perfecto de puntos (Como un collar de perlas)
+  const drawDotContour = (ctx, face, indices, color, radius, width, height) => {
+    if (!face || indices.length === 0) return;
+    ctx.fillStyle = color;
+    for (let i = 0; i < indices.length - 1; i++) {
+      const p1 = face[indices[i]]; const p2 = face[indices[i + 1]];
+      if (!p1 || !p2) continue;
+      
+      const x1 = (1 - p1.x) * width; const y1 = p1.y * height;
+      const x2 = (1 - p2.x) * width; const y2 = p2.y * height;
+      
+      const dist = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+      const steps = Math.max(2, Math.floor(dist / (radius * 1.8))); // Puntos casi tocándose
+      
+      for (let j = 0; j <= steps; j++) {
+        const t = j / steps;
+        ctx.beginPath();
+        ctx.arc(x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  };
+
+  // ==========================================
+  // GENERADORES DE PATRONES ARTÍSTICOS AVANZADOS
+  // ==========================================
+  const createBenDayPattern = (ctx, dotColor, bgColor, radius, spacing, style = 'dots') => {
+    const patternCanvas = document.createElement('canvas');
+    patternCanvas.width = spacing;
+    patternCanvas.height = spacing;
+    const pCtx = patternCanvas.getContext('2d');
+    
+    // Relleno de fondo plano
+    if (bgColor) {
+      pCtx.fillStyle = bgColor;
+      pCtx.fillRect(0, 0, spacing, spacing);
+    }
+    
+    pCtx.fillStyle = dotColor;
+    pCtx.strokeStyle = dotColor;
+
+    if (style === 'dots') {
+      // Puntos Ben-Day matemáticamente perfectos y separados (Estilo Lichtenstein)
+      pCtx.beginPath();
+      pCtx.arc(spacing / 2, spacing / 2, radius, 0, Math.PI * 2);
+      pCtx.fill();
+    } else if (style === 'hatch') {
+      // Trama de cómic dura (Líneas diagonales nítidas)
+      pCtx.lineWidth = radius * 1.5;
+      pCtx.beginPath();
+      pCtx.moveTo(-spacing, spacing * 2);
+      pCtx.lineTo(spacing * 2, -spacing);
+      pCtx.stroke();
+    } else {
+      // Bloques Warhol de alto contraste
+      pCtx.fillRect(0, 0, spacing, spacing / 2);
+    }
+    
+    return ctx.createPattern(patternCanvas, 'repeat');
+  };
+
+  // ==========================================
+  // SIMULADOR DE ROSTRO 3D DE RESPALDO (ROBUSTO)
+  // ==========================================
+  const generateSimulatedFace = (time) => {
+    const angleX = Math.sin(time * 0.001) * 0.22; 
+    const angleY = Math.cos(time * 0.0008) * 0.28; 
+    const blink = Math.sin(time * 0.005) > 0.96 ? 0.1 : 1.0;
+    const talk = Math.abs(Math.sin(time * 0.003)) * 0.05;
+
+    // Base tridimensional simplificada de puntos clave faciales (escalados en espacio 0.0 - 1.0)
+    const baseFace = [];
+    
+    // Generar un mapa índice para MediaPipe simulado
+    for (let i = 0; i <= 477; i++) {
+      // Asignamos null a los puntos no usados.
+      // Esto evita que las líneas colapsen hacia el centro (0.5) y elimina los picos feos del rostro.
+      baseFace[i] = null;
+    }
+
+    // Configurar silueta Oval (F_OVAL)
+    F_OVAL.forEach((idx, i) => {
+      const theta = (i / F_OVAL.length) * Math.PI * 2;
+      // Añadir algo de asimetría para parecer un rostro real de 3/4
+      const rx = 0.18 + Math.cos(theta) * 0.01;
+      const ry = 0.25 + Math.sin(theta) * 0.01;
+      
+      let x = 0.5 + Math.sin(theta) * rx;
+      let y = 0.5 + Math.cos(theta) * ry - 0.02;
+      
+      // Aplicar transformaciones 3D de rotación simulada
+      x += angleY * (1.0 - Math.abs(y - 0.5)) * 0.4;
+      y += angleX * (1.0 - Math.abs(x - 0.5)) * 0.4;
+
+      baseFace[idx] = { x, y, z: Math.sin(theta) * 0.1 };
+    });
+
+    // Ojo Izquierdo (F_LEYE)
+    F_LEYE.forEach((idx, i) => {
+      const theta = (i / F_LEYE.length) * Math.PI * 2;
+      let x = 0.43 + Math.cos(theta) * 0.028 + angleY * 0.15;
+      let y = 0.44 + Math.sin(theta) * 0.012 * blink + angleX * 0.15;
+      baseFace[idx] = { x, y, z: 0.05 };
+    });
+
+    // Ojo Derecho (F_REYE)
+    F_REYE.forEach((idx, i) => {
+      const theta = (i / F_REYE.length) * Math.PI * 2;
+      let x = 0.57 + Math.cos(theta) * 0.028 + angleY * 0.15;
+      let y = 0.44 + Math.sin(theta) * 0.012 * blink + angleX * 0.15;
+      baseFace[idx] = { x, y, z: 0.05 };
+    });
+
+    // Iris Izquierdo
+    F_LIRIS.forEach((idx, i) => {
+      const theta = (i / F_LIRIS.length) * Math.PI * 2;
+      let x = 0.43 + Math.cos(theta) * 0.01 + angleY * 0.16 + Math.sin(time * 0.001) * 0.005;
+      let y = 0.44 + Math.sin(theta) * 0.01 * blink + angleX * 0.16;
+      baseFace[idx] = { x, y, z: 0.06 };
+    });
+
+    // Iris Derecho
+    F_RIRIS.forEach((idx, i) => {
+      const theta = (i / F_RIRIS.length) * Math.PI * 2;
+      let x = 0.57 + Math.cos(theta) * 0.01 + angleY * 0.16 + Math.sin(time * 0.001) * 0.005;
+      let y = 0.44 + Math.sin(theta) * 0.01 * blink + angleX * 0.16;
+      baseFace[idx] = { x, y, z: 0.06 };
+    });
+
+    // Labios (F_LIPS)
+    F_LIPS.forEach((idx, i) => {
+      const theta = (i / F_LIPS.length) * Math.PI * 2;
+      const rx = 0.05 + Math.cos(theta) * 0.005;
+      const ry = 0.025 + Math.sin(theta) * (0.01 + talk);
+      
+      let x = 0.5 + Math.cos(theta) * rx + angleY * 0.18;
+      let y = 0.62 + Math.sin(theta) * ry + angleX * 0.18 + (talk * Math.sin(theta));
+      baseFace[idx] = { x, y, z: 0.04 };
+    });
+
+    // Cejas (F_LBRW & F_RBRW)
+    F_LBRW.forEach((idx, i) => {
+      const pct = i / F_LBRW.length;
+      let x = 0.38 + pct * 0.09 + angleY * 0.14;
+      let y = 0.40 - Math.sin(pct * Math.PI) * 0.018 + angleX * 0.14;
+      baseFace[idx] = { x, y, z: 0.03 };
+    });
+
+    F_RBRW.forEach((idx, i) => {
+      const pct = i / F_RBRW.length;
+      let x = 0.53 + pct * 0.09 + angleY * 0.14;
+      let y = 0.40 - Math.sin(pct * Math.PI) * 0.018 + angleX * 0.14;
+      baseFace[idx] = { x, y, z: 0.03 };
+    });
+
+    // Puntos aleatorios adicionales para triangulación estéticamente coherente
+    const extraPoints = [
+      { id: 67, x: 0.45, y: 0.35 }, { id: 109, x: 0.38, y: 0.35 }, { id: 10, x: 0.5, y: 0.23 },
+      { id: 338, x: 0.56, y: 0.25 }, { id: 297, x: 0.62, y: 0.35 }, { id: 332, x: 0.68, y: 0.38 },
+      { id: 103, x: 0.32, y: 0.38 }, { id: 54, x: 0.28, y: 0.44 }, { id: 21, x: 0.25, y: 0.50 },
+      { id: 162, x: 0.26, y: 0.58 }, { id: 127, x: 0.29, y: 0.66 }, { id: 234, x: 0.33, y: 0.72 },
+      { id: 93, x: 0.38, y: 0.78 }, { id: 132, x: 0.44, y: 0.82 }, { id: 58, x: 0.5, y: 0.84 },
+      { id: 172, x: 0.5, y: 0.84 }, { id: 136, x: 0.56, y: 0.82 }, { id: 150, x: 0.62, y: 0.78 },
+      { id: 149, x: 0.67, y: 0.72 }, { id: 176, x: 0.71, y: 0.66 }, { id: 148, x: 0.74, y: 0.58 },
+      { id: 152, x: 0.5, y: 0.86 }, { id: 251, x: 0.75, y: 0.50 }, { id: 389, x: 0.72, y: 0.44 },
+      { id: 356, x: 0.68, y: 0.38 }, { id: 454, x: 0.74, y: 0.55 }, { id: 323, x: 0.7, y: 0.65 },
+      { id: 361, x: 0.64, y: 0.74 }, { id: 288, x: 0.68, y: 0.52 }, { id: 397, x: 0.58, y: 0.72 },
+      { id: 365, x: 0.5, y: 0.75 }, { id: 379, x: 0.45, y: 0.72 }, { id: 378, x: 0.42, y: 0.65 },
+      { id: 400, x: 0.36, y: 0.74 }, { id: 377, x: 0.3, y: 0.65 }
+    ];
+
+    extraPoints.forEach(pt => {
+      let x = pt.x + angleY * 0.16;
+      let y = pt.y + angleX * 0.16;
+      baseFace[pt.id] = { x, y, z: 0.02 };
+    });
+
+    return baseFace;
+  };
+
+  // ==========================================
+  // CARGA DINÁMICA DE MEDIAPIPE FACE MESH
+  // ==========================================
+  useEffect(() => {
+    let active = true;
+    let cameraInstance = null;
+
+    const loadMediaPipe = async () => {
+      try {
+        setMpStatus('Cargando librerías de MediaPipe...');
+        
+        // Cargar scripts requeridos desde CDN oficial
+        await Promise.all([
+          loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js'),
+          loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js')
+        ]);
+
+        if (!active) return;
+        setMpStatus('MediaPipe cargado. Listo para iniciar cámara.');
+
+        // Inicializar FaceMesh
+        const faceMesh = new window.FaceMesh({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+        });
+
+        faceMesh.setOptions({
+          maxNumFaces: 1,
+          refineLandmarks: true,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5
+        });
+
+        faceMesh.onResults((results) => {
+          if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+            faceDataRef.current = results.multiFaceLandmarks[0];
+            setIsTracking(true);
+          } else {
+            setIsTracking(false);
+          }
+        });
+
+        if (useCamera && videoRef.current) {
+          setMpStatus('Conectando cámara de video...');
+          cameraInstance = new window.Camera(videoRef.current, {
+            onFrame: async () => {
+              if (useCamera && videoRef.current) {
+                await faceMesh.send({ image: videoRef.current });
+              }
+            },
+            width: 640,
+            height: 480
+          });
+          cameraInstance.start();
+          setMpStatus('Cámara Activa y Procesando.');
+        }
+
+      } catch (err) {
+        console.warn("MediaPipe falló o fue bloqueado, usando Simulador 3D de alta fidelidad.", err);
+        setMpStatus('Simulador Activo (Sin cámara física)');
+        setIsTracking(false);
+      }
+    };
+
+    if (useCamera) {
+      loadMediaPipe();
+    } else {
+      setMpStatus('Simulador Activo (Modo Arte Digital)');
+      setIsTracking(false);
+      if (cameraInstance) {
+        cameraInstance.stop();
+      }
+    }
+
+    return () => {
+      active = false;
+      if (cameraInstance) {
+        cameraInstance.stop();
+      }
+    };
+  }, [useCamera]);
+
+  // Cargador de Script Helper
+  const loadScript = (src) => {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  };
+
+  // ==========================================
+  // BUCLE PRINCIPAL DE RENDERIZADO DE ARTE
+  // ==========================================
+  useEffect(() => {
+    const renderLoop = (timestamp) => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        requestRef.current = requestAnimationFrame(renderLoop);
+        return;
+      }
+
+      const ctx = canvas.getContext('2d');
+      const width = canvas.width;
+      const height = canvas.height;
+
+      // Obtener o simular las coordenadas de la cara
+      let face = faceDataRef.current;
+      if (!useCamera || !face) {
+        simAngleRef.current += 1.2; // Velocidad de animación simulada
+        face = generateSimulatedFace(timestamp);
+      }
+
+      ctx.clearRect(0, 0, width, height);
+
+      // --- ASIGNACIÓN DE PALETAS SEGÚN REGLA 1 (ESTRICTA) ---
+      const isFemale = paletteGender === 'female';
+      const isMale = paletteGender === 'male';
+
+      if (arteThemeIdx === 0) {
+        // ==========================================
+        // ESTILO 0: ARTE POP (RESTAURADO EXACTO A LA VERSIÓN CARICATURA)
+        // ==========================================
+        let baseColor, dotColor, lipColor, eyebrowColor;
+        
+        if (isFemale) {
+          baseColor = '#ffffff'; dotColor = '#e11d48'; lipColor = '#e11d48'; eyebrowColor = '#0ea5e9';
+        } else if (isMale) {
+          baseColor = '#ffffff'; dotColor = '#1e293b'; lipColor = '#ffffff'; eyebrowColor = null;
+        } else {
+          baseColor = '#fef08a'; dotColor = '#db2777'; lipColor = '#06b6d4'; eyebrowColor = '#8b5cf6';
+        }
+
+        ctx.fillStyle = isFemale ? '#dc2626' : (isMale ? '#2563eb' : '#0f172a');
+        ctx.fillRect(0, 0, width, height);
+
+        // 1. Piel blanca/sólida
+        fillPath(ctx, face, F_OVAL, baseColor, width, height);
+
+        // 2. Patrón Ben-Day perfecto global (Sin desfases extraños)
+        const radius = Math.max(1.5, dotSize * 0.35); 
+        const spacing = dotSize * 1.5; 
+        const popPattern = createBenDayPattern(ctx, dotColor, null, radius, spacing, popStyle);
+        if (popPattern) {
+          fillPath(ctx, face, F_OVAL, popPattern, width, height);
+        }
+
+        const comicOutline = strokeWeight * 1.8;
+
+        // 3. Cejas de doble trazo (Color grueso + Negro fino en el centro)
+        if (eyebrowColor) {
+          strokePath(ctx, face, F_LBRW, eyebrowColor, 18, width, height);
+          strokePath(ctx, face, F_RBRW, eyebrowColor, 18, width, height);
+        }
+
+        // 4. Ojos blancos simples
+        fillPath(ctx, face, F_LEYE, '#ffffff', width, height);
+        fillPath(ctx, face, F_REYE, '#ffffff', width, height);
+
+        if (F_LIRIS.length) {
+          const irisColor = isFemale ? '#0ea5e9' : (isMale ? '#dc2626' : '#eab308');
+          fillPath(ctx, face, F_LIRIS, irisColor, width, height);
+          fillPath(ctx, face, F_RIRIS, irisColor, width, height);
+        }
+
+        // 5. Labios simplificados
+        if (!isMale) {
+            fillPath(ctx, face, F_LIPS, lipColor, width, height);
+        } else {
+            // Hombre: Solo labio inferior blanco
+            const lowerLip = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 312, 13, 82, 81, 80, 191];
+            fillPath(ctx, face, lowerLip, '#ffffff', width, height);
+        }
+
+        // 6. Contornos Negros de Cómic
+        strokePath(ctx, face, F_OVAL, '#000000', comicOutline * 1.5, width, height);
+        strokePath(ctx, face, F_LEYE, '#000000', comicOutline, width, height);
+        strokePath(ctx, face, F_REYE, '#000000', comicOutline, width, height);
+        strokePath(ctx, face, F_LIPS, '#000000', comicOutline, width, height);
+        strokePath(ctx, face, F_LBRW, '#000000', comicOutline, width, height);
+        strokePath(ctx, face, F_RBRW, '#000000', comicOutline, width, height);
+
+        // Párpado superior dramático
+        const upperEyeLeft = [157, 158, 159, 160, 161];
+        const upperEyeRight = [384, 385, 386, 387, 388];
+        strokePath(ctx, face, upperEyeLeft, '#000000', comicOutline * 2, width, height);
+        strokePath(ctx, face, upperEyeRight, '#000000', comicOutline * 2, width, height);
+
+      } else if (arteThemeIdx === 1) {
+        // ==========================================
+        // ESTILO 1: PUNTILLISMO (NUEVO MOTOR DE RELLENO CON TEXTURA REAL)
+        // ==========================================
+        let paletteImpressionism, paletteGeometric, paletteRadial, bgPointillism;
+        
+        if (isFemale) {
+          paletteImpressionism = ['#fde047', '#f9a8d4', '#f87171', '#38bdf8', '#818cf8']; 
+          paletteGeometric = ['#ef4444', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6']; 
+          paletteRadial = ['#fbbf24', '#f472b6', '#34d399', '#60a5fa', '#f87171', '#c084fc'];
+          bgPointillism = '#fffbf0';
+        } else if (isMale) {
+          paletteImpressionism = ['#fed7aa', '#fdba74', '#9ca3af', '#60a5fa', '#34d399']; 
+          paletteGeometric = ['#b91c1c', '#047857', '#b45309', '#1d4ed8', '#4338ca']; 
+          paletteRadial = ['#d97706', '#dc2626', '#059669', '#2563eb', '#ea580c', '#14b8a6'];
+          bgPointillism = '#fafaf9';
+        } else {
+          paletteImpressionism = ['#fcd34d', '#c084fc', '#5eead4', '#f43f5e', '#a78bfa']; 
+          paletteGeometric = ['#f43f5e', '#8b5cf6', '#06b6d4', '#f59e0b', '#10b981']; 
+          paletteRadial = ['#a855f7', '#ec4899', '#14b8a6', '#f59e0b', '#ef4444', '#3b82f6'];
+          bgPointillism = '#fef08a';
+        }
+
+        // Ajustamos dinámicamente el radio de los puntos según la densidad del UI
+        const dotRad = Math.max(1.5, 6 - (pointillismDensity / 60));
+
+        if (pointillismStyle === 'impressionism') {
+          // ---------------------------------------------------------
+          // TÉCNICA 1: IMPRESIONISMO (Toda la cara rellena de textura densa)
+          // ---------------------------------------------------------
+          ctx.fillStyle = bgPointillism;
+          ctx.fillRect(0, 0, width, height);
+
+          // Rellenamos triángulo por triángulo de la malla
+          for (let i = 0; i < F_TESS.length; i++) {
+             const tri = F_TESS[i];
+             const pt = face[tri[0]];
+             if (!pt) continue;
+
+             // Calculamos sombra basada en la altura (Y) de la cara
+             const cIndex = Math.floor(pt.y * paletteImpressionism.length);
+             const baseColor = paletteImpressionism[Math.min(cIndex, paletteImpressionism.length - 1)];
+             const blendColor = paletteImpressionism[(cIndex + 1) % paletteImpressionism.length];
+             
+             // Inyectamos miles de puntos dentro de cada polígono
+             fillWithDots(ctx, face, tri, [baseColor, blendColor, bgPointillism], pointillismDensity * 3, dotRad, width, height);
+          }
+          
+          fillPath(ctx, face, F_LEYE, '#ffffff', width, height);
+          fillPath(ctx, face, F_REYE, '#ffffff', width, height);
+          if(F_LIRIS.length) {
+              fillPath(ctx, face, F_LIRIS, '#1e1b4b', width, height);
+              fillPath(ctx, face, F_RIRIS, '#1e1b4b', width, height);
+          }
+
+        } else if (pointillismStyle === 'geometric') {
+          // ---------------------------------------------------------
+          // TÉCNICA 2: VITRAL CON PUNTOS (Relleno Denso adentro, borde negro afuera)
+          // ---------------------------------------------------------
+          ctx.fillStyle = '#050505';
+          ctx.fillRect(0, 0, width, height);
+
+          // 1. Relleno súper denso DE PUNTOS dentro de cada bloque del vitral
+          for (let i = 0; i < F_TESS.length; i++) {
+            const tri = F_TESS[i];
+            const triColor = paletteGeometric[i % paletteGeometric.length];
+            const mixColor = paletteGeometric[(i+1) % paletteGeometric.length];
+            
+            // Llenamos el bloque hasta reventar de puntos (Textura tapizada)
+            fillWithDots(ctx, face, tri, [triColor, triColor, mixColor], pointillismDensity * 2.5, dotRad, width, height);
+          }
+
+          // 2. Trazado grueso de las líneas estructurales por encima
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = strokeWeight * 1.5;
+          ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+          for (let i = 0; i < F_TESS.length; i++) {
+            const tri = F_TESS[i];
+            const ptA = face[tri[0]]; const ptB = face[tri[1]]; const ptC = face[tri[2]];
+            if (!ptA || !ptB || !ptC) continue;
+            ctx.beginPath();
+            ctx.moveTo((1 - ptA.x) * width, ptA.y * height);
+            ctx.lineTo((1 - ptB.x) * width, ptB.y * height);
+            ctx.lineTo((1 - ptC.x) * width, ptC.y * height);
+            ctx.closePath();
+            ctx.stroke();
+          }
+
+          // Rasgos geométricos
+          fillPath(ctx, face, F_LEYE, '#ffffff', width, height); strokePath(ctx, face, F_LEYE, '#000000', strokeWeight, width, height);
+          fillPath(ctx, face, F_REYE, '#ffffff', width, height); strokePath(ctx, face, F_REYE, '#000000', strokeWeight, width, height);
+          if(F_LIRIS.length) {
+              fillPath(ctx, face, F_LIRIS, '#000000', width, height);
+              fillPath(ctx, face, F_RIRIS, '#000000', width, height);
+          }
+          fillPath(ctx, face, F_LIPS, '#000000', width, height);
+
+        } else {
+          // ---------------------------------------------------------
+          // TÉCNICA 3: ABORIGEN / ESPACIO NEGATIVO (Como la Imagen de Referencia)
+          // ---------------------------------------------------------
+          ctx.fillStyle = '#0a0a0a'; // Fondo negro puro donde se pierde la cara
+          ctx.fillRect(0, 0, width, height);
+
+          // Rellenar las "Islas" de la cara con densidad total de puntos
+          for (let i = 0; i < F_TESS.length; i++) {
+              const tri = F_TESS[i];
+              const ptA = face[tri[0]]; const ptB = face[tri[1]]; const ptC = face[tri[2]];
+              if (!ptA || !ptB || !ptC) continue;
+
+              const cx = (1 - ((ptA.x + ptB.x + ptC.x) / 3)); 
+              const cy = (ptA.y + ptB.y + ptC.y) / 3;
+
+              // Las "Anclas" que definen dónde existirá el arte (Ojo, Mandíbula, Frente)
+              const anchorRightEye = face[159] ? {x: 1 - face[159].x, y: face[159].y} : {x: 0.65, y: 0.4};
+              const anchorLeftJaw = face[132] ? {x: 1 - face[132].x, y: face[132].y} : {x: 0.35, y: 0.75};
+              const anchorTopMid = face[10] ? {x: 1 - face[10].x, y: face[10].y} : {x: 0.5, y: 0.2};
+
+              const d1 = Math.sqrt((cx - anchorRightEye.x)**2 + (cy - anchorRightEye.y)**2);
+              const d2 = Math.sqrt((cx - anchorLeftJaw.x)**2 + (cy - anchorLeftJaw.y)**2);
+              const d3 = Math.sqrt((cx - anchorTopMid.x)**2 + (cy - anchorTopMid.y)**2);
+
+              let activeDist = null;
+              let colorOffset = 0;
+
+              // Radios de las máscaras (Todo lo que esté fuera de esto se queda negro absoluto)
+              if (d1 < 0.20) { activeDist = d1; colorOffset = 0; } // Zona Ojo Derecho
+              else if (d2 < 0.28) { activeDist = d2; colorOffset = 2; } // Zona Mandíbula Izquierda
+              else if (d3 < 0.18) { activeDist = d3; colorOffset = 4; } // Zona Frente Superior
+
+              if (activeDist === null) continue; // Si no está en la isla, la dejamos negra
+
+              // Anillos concéntricos basados en la distancia al centro de la isla
+              const colorIdx = (Math.floor(activeDist * 35) + colorOffset) % paletteRadial.length;
+              const ringColor = paletteRadial[colorIdx];
+
+              // Rellenamos estricta y densamente ESA zona específica (Espacio Negativo real)
+              fillWithDots(ctx, face, tri, [ringColor], pointillismDensity * 3.5, dotRad * 1.5, width, height);
+          }
+
+          // Dibujar líneas brillantes de puntos flotando encima de los bloques
+          drawDotContour(ctx, face, F_LEYE, '#ffffff', dotRad * 1.3, width, height);
+          drawDotContour(ctx, face, F_REYE, '#ffffff', dotRad * 1.3, width, height);
+          if(F_LIRIS.length) {
+              drawDotContour(ctx, face, F_LIRIS, paletteRadial[1], dotRad * 1.8, width, height);
+              drawDotContour(ctx, face, F_RIRIS, paletteRadial[1], dotRad * 1.8, width, height);
+          }
+          drawDotContour(ctx, face, F_LIPS, paletteRadial[3], dotRad * 1.2, width, height);
+        }
+
+      } else if (arteThemeIdx === 2) {
+        // ==========================================
+        // ESTILO 2: ÓLEO / ESPÁTULA (Textura de Empaste 3D)
+        // ==========================================
+        let palette;
+        if (isFemale) {
+          palette = [
+            '#ff007f', // Fucsia encendido
+            '#00e5ff', // Cyan neón
+            '#ffea00', // Amarillo cadmio
+            '#ff5e00', // Naranja atardecer
+            '#d500f9', // Violeta intenso
+            '#ffffff', // Blanco titanio para brillos de óleo
+            '#3a005c'  // Sombra purpúrea
+          ];
+        } else if (isMale) {
+          palette = [
+            '#ff3d00', // Bermellón puro
+            '#2962ff', // Azul ultramar
+            '#d50000', // Crimson
+            '#00c853', // Verde pino
+            '#ffab00', // Oro ocre
+            '#3e2723', // Sombra quemada
+            '#ffffff'
+          ];
+        } else {
+          palette = [
+            '#ff6d00', // Mandarina
+            '#00bfa5', // Verde azulado
+            '#ffd600', // Amarillo limón
+            '#c51162', // Borgoña profundo
+            '#4a148c', // Índigo místico
+            '#e0f7fa'  // Azul cerúleo claro
+          ];
+        }
+
+        // Fondo oscuro para destacar la plasticidad del óleo
+        ctx.fillStyle = '#121212';
+        ctx.fillRect(0, 0, width, height);
+
+        // Capa base del óvalo facial para evitar huecos en la triangulación
+        fillPath(ctx, face, F_OVAL, '#212121', width, height);
+
+        ctx.save();
+        
+        // Recorrer los triángulos de la malla facial (F_TESS)
+        for (let i = 0; i < F_TESS.length; i++) {
+          const triangle = F_TESS[i];
+          const pt1 = face[triangle[0]];
+          const pt2 = face[triangle[1]];
+          const pt3 = face[triangle[2]];
+          if (!pt1 || !pt2 || !pt3) continue;
+
+          // Selección armónica de color de la paleta
+          const color = palette[i % palette.length];
+
+          // Coordenadas en canvas
+          const x1 = (1 - pt1.x) * width;
+          const y1 = pt1.y * height;
+          const x2 = (1 - pt2.x) * width;
+          const y2 = pt2.y * height;
+          const x3 = (1 - pt3.x) * width;
+          const y3 = pt3.y * height;
+
+          // 1. Relleno texturizado del triángulo mediante Degradados Lineales
+          // Esto simula que el color de la pintura cambia orgánicamente con la luz del relieve
+          const grad = ctx.createLinearGradient(x1, y1, x2, y2);
+          grad.addColorStop(0, color);
+          grad.addColorStop(0.7, color);
+          // Mezcla de óleo húmedo (toma trazos del color vecino)
+          grad.addColorStop(1, palette[(i + 1) % palette.length]);
+
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.lineTo(x3, y3);
+          ctx.closePath();
+          ctx.fillStyle = grad;
+          ctx.fill();
+
+          // 2. EFECTO IMPASTO (RELIEVE DE ESPÁTULA 3D)
+          // Dibujamos un relieve grueso en los bordes del triángulo con sombra para simular espesor físico
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+          ctx.shadowBlur = oilRelief;
+          ctx.shadowOffsetX = oilRelief * 0.4;
+          ctx.shadowOffsetY = oilRelief * 0.5;
+
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          
+          ctx.lineWidth = oilThickness;
+          ctx.strokeStyle = color;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.stroke();
+
+          // Apagar sombra para las siguientes subcapas de brillo
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+
+          // 3. Brillo de la cresta de pintura húmeda (Highlights de óleo)
+          // Una línea muy fina semi-transparente que simula el reflejo especular en el lomo de la pincelada
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.lineWidth = oilThickness * 0.22;
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+          ctx.stroke();
+
+          // 4. Sombra de separación (crea volumen entre bloques de espátula adyacentes)
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x3, y3);
+          ctx.lineWidth = 1.5;
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+          ctx.stroke();
+        }
+        
+        ctx.restore();
+
+        // Ojos expresivos de óleo denso
+        strokePath(ctx, face, F_LEYE, '#ffffff', 5, width, height);
+        strokePath(ctx, face, F_REYE, '#ffffff', 5, width, height);
+        if (F_LIRIS.length) {
+          fillPath(ctx, face, F_LIRIS, '#000000', width, height);
+          fillPath(ctx, face, F_RIRIS, '#000000', width, height);
+        }
+        
+        // Labios de óleo texturizado
+        strokePath(ctx, face, F_LIPS, isFemale ? '#e11d48' : '#991b1b', 12, width, height);
+        strokePath(ctx, face, F_LIPS, 'rgba(255, 255, 255, 0.5)', 3, width, height);
+      }
+
+      // Ciclar bucle
+      requestRef.current = requestAnimationFrame(renderLoop);
+    };
+
+    requestRef.current = requestAnimationFrame(renderLoop);
+    return () => cancelAnimationFrame(requestRef.current);
+  }, [arteThemeIdx, popStyle, pointillismStyle, paletteGender, useCamera, dotSize, misregistration, strokeWeight, oilThickness, oilRelief, pointillismDensity]);
+
+  // ==========================================
+  // DISPARADORES DE INTERFAZ Y ACCIONES
+  // ==========================================
+  const handleRandomize = () => {
+    // Generar variaciones al azar de los parámetros artísticos
+    setDotSize(Math.floor(Math.random() * 12) + 6);
+    setMisregistration(Math.floor(Math.random() * 12) + 1);
+    setStrokeWeight(Math.floor(Math.random() * 5) + 3);
+    setOilThickness(Math.floor(Math.random() * 14) + 10);
+    setOilRelief(Math.floor(Math.random() * 8) + 4);
+    setPointillismDensity(Math.floor(Math.random() * 100) + 90);
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-white flex flex-col font-sans selection:bg-rose-500 selection:text-white">
+      {/* Filtro rústico de textura de lienzo físico mediante SVG (Look orgánico, no digital) */}
+      <svg style={{ display: 'none' }}>
+        <filter id="canvas-grain-filter">
+          <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="4" result="noise" />
+          <feDiffuseLighting in="noise" lightingColor="#ffffff" surfaceScale="2" result="light">
+            <feDistantLight azimuth="55" elevation="65" />
+          </feDiffuseLighting>
+          <feBlend mode="multiply" in="SourceGraphic" in2="light" />
+        </filter>
+      </svg>
+
+      {/* HEADER DE LA APLICACIÓN */}
+      <header className="border-b border-neutral-800 bg-neutral-900/80 backdrop-blur px-6 py-4 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-50">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-rose-500 via-violet-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-rose-500/20">
+            <span className="font-black text-white text-lg">🎨</span>
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-neutral-200 to-neutral-400 bg-clip-text text-transparent">
+              Estudio de Arte Generativo FaceMesh
+            </h1>
+            <p className="text-xs text-neutral-400">Pinceles físicos y simulador tridimensional en Canvas 2D</p>
+          </div>
+        </div>
+
+        {/* Indicador de Estado del Motor */}
+        <div className="flex items-center gap-3 bg-neutral-950/80 px-4 py-2 rounded-full border border-neutral-800">
+          <span className={`h-2.5 w-2.5 rounded-full ${isTracking ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
+          <span className="text-xs font-medium text-neutral-300">{mpStatus}</span>
+        </div>
+      </header>
+
+      {/* ÁREA DE CONTENIDO */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        
+        {/* PANEL IZQUIERDO: SELECCIÓN DE ESTILO Y PARÁMETROS */}
+        <section className="lg:col-span-4 flex flex-col gap-5 bg-neutral-900/50 p-6 rounded-3xl border border-neutral-800/80 shadow-2xl backdrop-blur-sm self-start">
+          
+          {/* SECCIÓN 1: ESTILOS DE ARTE (BOTONES GRANDES) */}
+          <div>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-3">Estilos de Arte Principal</h2>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { label: 'Arte Pop', icon: '💥' },
+                { label: 'Puntillismo', icon: '✨' },
+                { label: 'Óleo 3D', icon: '🖌️' }
+              ].map((style, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setArteThemeIdx(idx)}
+                  className={`py-3 px-2 rounded-2xl flex flex-col items-center gap-1.5 transition-all ${
+                    arteThemeIdx === idx 
+                      ? 'bg-white text-neutral-950 font-bold shadow-lg shadow-white/5 scale-[1.03]' 
+                      : 'bg-neutral-800/60 hover:bg-neutral-800 text-neutral-400 hover:text-white'
+                  }`}
+                >
+                  <span className="text-xl">{style.icon}</span>
+                  <span className="text-[11px] tracking-tight">{style.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <hr className="border-neutral-800" />
+
+          {/* SECCIÓN 2: PALETA DE COLOR CONDICIONAL (REGLA 1) */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Paleta Cromática (Regla 1)</h2>
+              <span className="text-[10px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded-md">Condicional</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'female', label: 'Femenino', desc: 'Tonos Cálidos / Pastel' },
+                { id: 'male', label: 'Masculino', desc: 'Tonos Fríos / Tierra' },
+                { id: 'else', label: 'Neutro', desc: 'Tonos Psicodélicos' }
+              ].map((gender) => (
+                <button
+                  key={gender.id}
+                  onClick={() => setPaletteGender(gender.id)}
+                  className={`p-2.5 rounded-xl text-left border transition-all ${
+                    paletteGender === gender.id 
+                      ? 'border-white bg-white/5 text-white' 
+                      : 'border-neutral-800 hover:border-neutral-700 bg-transparent text-neutral-400'
+                  }`}
+                >
+                  <div className="text-xs font-bold">{gender.label}</div>
+                  <div className="text-[9px] text-neutral-500 leading-tight mt-0.5">{gender.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <hr className="border-neutral-800" />
+
+          {/* SECCIÓN 3: CONTROLES DE ESTILO DINÁMICOS */}
+          <div className="flex-1 flex flex-col gap-4">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-neutral-400">Parámetros del Pincel</h2>
+            
+            {/* Controles dinámicos según estilo seleccionado */}
+            {arteThemeIdx === 0 && (
+              <div className="flex flex-col gap-4 animate-fadeIn">
+                {/* Selector de sub-estilo Pop */}
+                <div>
+                  <label className="text-xs text-neutral-400 block mb-1.5">Variación del Trazado Ben-Day</label>
+                  <div className="grid grid-cols-3 gap-1.5 p-1 bg-neutral-950 rounded-lg">
+                    {[
+                      { id: 'dots', label: 'Puntos' },
+                      { id: 'hatch', label: 'Líneas' },
+                      { id: 'warhol', label: 'Bloques' }
+                    ].map((style) => (
+                      <button
+                        key={style.id}
+                        onClick={() => setPopStyle(style.id)}
+                        className={`py-1.5 px-2 rounded text-xs transition-all ${
+                          popStyle === style.id ? 'bg-neutral-800 text-white font-medium' : 'text-neutral-500 hover:text-white'
+                        }`}
+                      >
+                        {style.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tamaño de puntos Ben-Day */}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-neutral-400">Escala de la Trama</span>
+                    <span className="text-neutral-300 font-mono">{dotSize}px</span>
+                  </div>
+                  <input 
+                    type="range" min="6" max="24" value={dotSize} 
+                    onChange={(e) => setDotSize(parseInt(e.target.value))}
+                    className="w-full accent-rose-500 bg-neutral-800 h-1.5 rounded-lg cursor-pointer"
+                  />
+                </div>
+
+                {/* Desalineación Pop */}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-neutral-400">Desfase de Serigrafía (Bleed)</span>
+                    <span className="text-neutral-300 font-mono">{misregistration}px</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="15" value={misregistration} 
+                    onChange={(e) => setMisregistration(parseInt(e.target.value))}
+                    className="w-full accent-rose-500 bg-neutral-800 h-1.5 rounded-lg cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+
+            {arteThemeIdx === 1 && (
+              <div className="flex flex-col gap-4 animate-fadeIn">
+                 {/* Selector de Técnica Puntillista */}
+                 <div>
+                  <label className="text-xs text-neutral-400 block mb-1.5">Técnica de Punteado</label>
+                  <div className="grid grid-cols-3 gap-1.5 p-1 bg-neutral-950 rounded-lg">
+                    {[
+                      { id: 'impressionism', label: 'Realista' },
+                      { id: 'geometric', label: 'Vitral' },
+                      { id: 'radial', label: 'Aborigen' }
+                    ].map((style) => (
+                      <button
+                        key={style.id}
+                        onClick={() => setPointillismStyle(style.id)}
+                        className={`py-1.5 px-1 rounded text-[10px] sm:text-xs transition-all ${
+                          pointillismStyle === style.id ? 'bg-neutral-800 text-white font-medium' : 'text-neutral-500 hover:text-white'
+                        }`}
+                      >
+                        {style.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Densidad Puntillista */}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-neutral-400">Densidad de Pinceladas</span>
+                    <span className="text-neutral-300 font-mono">{pointillismDensity} dabs</span>
+                  </div>
+                  <input 
+                    type="range" min="50" max="400" value={pointillismDensity} 
+                    onChange={(e) => setPointillismDensity(parseInt(e.target.value))}
+                    className="w-full accent-cyan-400 bg-neutral-800 h-1.5 rounded-lg cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+
+            {arteThemeIdx === 2 && (
+              <div className="flex flex-col gap-4 animate-fadeIn">
+                {/* Grosor del óleo */}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-neutral-400">Grosor de la Espátula</span>
+                    <span className="text-neutral-300 font-mono">{oilThickness}px</span>
+                  </div>
+                  <input 
+                    type="range" min="8" max="24" value={oilThickness} 
+                    onChange={(e) => setOilThickness(parseInt(e.target.value))}
+                    className="w-full accent-yellow-400 bg-neutral-800 h-1.5 rounded-lg cursor-pointer"
+                  />
+                </div>
+
+                {/* Sombreado de relieve de óleo */}
+                <div>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-neutral-400">Relieve Tridimensional (Impasto)</span>
+                    <span className="text-neutral-300 font-mono">{oilRelief}px</span>
+                  </div>
+                  <input 
+                    type="range" min="2" max="15" value={oilRelief} 
+                    onChange={(e) => setOilRelief(parseInt(e.target.value))}
+                    className="w-full accent-yellow-400 bg-neutral-800 h-1.5 rounded-lg cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Grosor de línea de contorno general */}
+            <div>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-neutral-400">Contorno / Tinta China</span>
+                <span className="text-neutral-300 font-mono">{strokeWeight}px</span>
+              </div>
+              <input 
+                type="range" min="1" max="8" value={strokeWeight} 
+                onChange={(e) => setStrokeWeight(parseInt(e.target.value))}
+                className="w-full accent-violet-500 bg-neutral-800 h-1.5 rounded-lg cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <hr className="border-neutral-800" />
+
+          {/* SECCIÓN 4: ACCIONES GENERALES */}
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleRandomize}
+              className="w-full py-2.5 bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs font-semibold rounded-xl border border-neutral-700 transition-all flex items-center justify-center gap-1.5"
+            >
+              🎲 Variación Aleatoria de Trazo
+            </button>
+            
+            <div className="flex items-center justify-between p-3 rounded-xl bg-neutral-950 border border-neutral-800">
+              <div className="flex flex-col">
+                <span className="text-xs font-medium">Textura de Lienzo</span>
+                <span className="text-[10px] text-neutral-500">Aplica grano rústico al renderizado</span>
+              </div>
+              <button 
+                onClick={() => setShowCanvasGrain(!showCanvasGrain)}
+                className={`w-10 h-6 rounded-full p-1 transition-all ${showCanvasGrain ? 'bg-emerald-500' : 'bg-neutral-800'}`}
+              >
+                <div className={`w-4 h-4 rounded-full bg-white transition-all transform ${showCanvasGrain ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+            </div>
+          </div>
+
+        </section>
+
+        {/* PANEL CENTRAL: CANVAS DE RENDERIZADO DE ARTE */}
+        <section className="lg:col-span-8 flex flex-col gap-4">
+          
+          {/* CONTROL DE ENTRADA (CÁMARA / SIMULADOR) */}
+          <div className="flex justify-between items-center bg-neutral-900/40 p-3 rounded-2xl border border-neutral-800/80">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setUseCamera(false)}
+                className={`py-1.5 px-4 rounded-xl text-xs font-bold transition-all ${
+                  !useCamera 
+                    ? 'bg-neutral-800 text-white shadow-inner' 
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                🎭 Simulador Facial 3D (Bucle de Movimiento)
+              </button>
+              <button
+                onClick={() => setUseCamera(true)}
+                className={`py-1.5 px-4 rounded-xl text-xs font-bold transition-all ${
+                  useCamera 
+                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' 
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                📷 Usar Cámara Web con MediaPipe
+              </button>
+            </div>
+          </div>
+
+          {/* CANVAS DEL RENDERIZADOR */}
+          <div className="flex-1 bg-neutral-950 rounded-3xl border border-neutral-800/80 shadow-inner relative overflow-hidden flex items-center justify-center min-h-[480px]">
+            {/* Cámara web oculta para alimentación de MediaPipe */}
+            {useCamera && (
+              <video 
+                ref={videoRef}
+                style={{ display: 'none' }}
+                playsInline
+                muted
+                width="640"
+                height="480"
+              />
+            )}
+
+            {/* Canvas Principal */}
+            <canvas
+              ref={canvasRef}
+              width={640}
+              height={480}
+              className={`max-w-full rounded-2xl shadow-2xl aspect-[4/3] transition-all bg-neutral-950 ${
+                (showCanvasGrain && arteThemeIdx !== 0) ? 'filter-canvas-grain' : ''
+              }`}
+              style={{
+                // FIX: El filtro SVG de textura rústica SE DESACTIVA OBLIGATORIAMENTE en Arte Pop (arteThemeIdx === 0)
+                // para mantener la estética de impresión limpia sin manchas ni ruido detrás de los puntos.
+                filter: (showCanvasGrain && arteThemeIdx !== 0) ? 'url(#canvas-grain-filter) contrast(1.05) saturate(1.1)' : 'none'
+              }}
+            />
+
+            {/* Leyenda flotante indicando modo de simulación o cámara activa */}
+            <div className="absolute bottom-4 right-4 bg-neutral-900/90 backdrop-blur px-3 py-1.5 rounded-full border border-neutral-800 text-[10px] text-neutral-400 flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              {useCamera ? 'Captura de Cámara en Directo' : 'Rotación Orbital Procedural'}
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+      {/* FOOTER */}
+      <footer className="border-t border-neutral-900 bg-neutral-950 py-4 text-center text-xs text-neutral-500">
+        <p>© 2026 Estudio de Pintura Digital No-Destructiva. Cumple con las Reglas de Integración de MediaPipe.</p>
+      </footer>
+    </div>
+  );
+}

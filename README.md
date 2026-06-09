@@ -30,8 +30,10 @@ La demostración incluye un conjunto robusto de características diseñadas para
     *   **Conejo (🐰)**: Filtro facial con orejas animadas, nariz rosa y bigotes 3D.
     *   **Sombrero de Copa (🎩)**: Integración espacial de un sombrero de mago con cinta de satín.
     *   **Rastro Luminoso (💫)**: Generación de partículas arcoíris y lluvia de destellos al mover las manos.
-    *   **Arte Clásico (🎨)**: Patrones artísticos generativos en vivo (Arte Pop, Puntillismo, Óleo).
-    *   **Todo Junto (✨)**: Renderizado superpuesto de todos los filtros simultáneamente manteniendo la tasa de fotogramas.
+    *   **Arte Clásico (🎨)**: Motores de renderizado artístico en tiempo real con asignación dinámica de paletas por usuario:
+        *   **Arte Pop / Warhol**: Generación paramétrica estilo cómic con texturas Ben-Day, contornos marcados (nariz recta, pómulos en L) y un sistema de variaciones aleatorias para estructura facial (labios/ojos) y color, creando hasta 18 combinaciones estéticas únicas por persona.
+        *   **Puntillismo**: Recreación de punteado de distintos radios con combinaciones cromáticas adaptables.
+        *   **Óleo / Espátula**: Simulación de pintura densa tridimensional con iluminación y colores procedimentales.
 *   **Interacción Sin Contacto (Touchless)**: Uso de detección de manos para interactuar con botones de la interfaz apuntando el dedo índice al visor.
 
 ## 🚀 Inicio Rápido

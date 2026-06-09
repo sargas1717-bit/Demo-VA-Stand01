@@ -247,7 +247,7 @@ export function Workspace({
   const scoreRef = useRef(score);
 
   // Contador global para alternar paletas de colores cuando entra una nueva persona
-  const appearanceCounterRef = useRef<number>(0);
+  const appearanceCounterRef = useRef<number>(Math.floor(Math.random() * 100));
   const previousFaceCountRef = useRef<number>(0);
 
   // Timers hover para los botones virtuales interactivos en Filtros
@@ -507,6 +507,34 @@ export function Workspace({
   // --- SECCIÓN: ALGORITMOS DE DIBUJO E INTERPRETACIÓN ---
 
   // --- CREADORES DE PATRONES ARTE ---
+  const createBenDayPattern = (ctx: CanvasRenderingContext2D, dotColor: string, bgColor: string | null, radius: number, spacing: number, style: string = 'dots') => {
+    const patternCanvas = document.createElement('canvas');
+    patternCanvas.width = spacing;
+    patternCanvas.height = spacing;
+    const pCtx = patternCanvas.getContext('2d');
+    if (!pCtx) return null;
+    if (bgColor) {
+      pCtx.fillStyle = bgColor;
+      pCtx.fillRect(0, 0, spacing, spacing);
+    }
+    pCtx.fillStyle = dotColor;
+    pCtx.strokeStyle = dotColor;
+    if (style === 'dots') {
+      pCtx.beginPath();
+      pCtx.arc(spacing / 2, spacing / 2, radius, 0, Math.PI * 2);
+      pCtx.fill();
+    } else if (style === 'hatch') {
+      pCtx.lineWidth = radius * 1.5;
+      pCtx.beginPath();
+      pCtx.moveTo(-spacing, spacing * 2);
+      pCtx.lineTo(spacing * 2, -spacing);
+      pCtx.stroke();
+    } else {
+      pCtx.fillRect(0, 0, spacing, spacing / 2);
+    }
+    return ctx.createPattern(patternCanvas, 'repeat');
+  };
+
   const createHalftonePattern = (ctx: CanvasRenderingContext2D, dotColor: string, bgColor: string, size: number) => {
     const c = document.createElement('canvas');
     c.width = size; c.height = size;
@@ -542,13 +570,20 @@ export function Workspace({
 
   // --- FUNCIONES DE DIBUJO ARTE ---
   const fillPath = (ctx: CanvasRenderingContext2D, landmarks: any[], connectionArray: any[], fillStyle: any, width: number, height: number) => {
-    if (!landmarks || !connectionArray) return;
+    if (!landmarks || !connectionArray || connectionArray.length === 0) return;
+    const isTuple = typeof connectionArray[0] !== 'number';
     ctx.beginPath();
+    let started = false;
     for (let i = 0; i < connectionArray.length; i++) {
-        const pt = landmarks[connectionArray[i][0]];
+        const index = isTuple ? connectionArray[i][0] : connectionArray[i];
+        const pt = landmarks[index];
         if (!pt) continue;
-        if (i === 0) ctx.moveTo((1 - pt.x) * width, pt.y * height);
-        else ctx.lineTo((1 - pt.x) * width, pt.y * height);
+        if (!started) { ctx.moveTo((1 - pt.x) * width, pt.y * height); started = true; }
+        else { ctx.lineTo((1 - pt.x) * width, pt.y * height); }
+    }
+    if (isTuple && connectionArray.length > 0) {
+      const lastPt = landmarks[connectionArray[connectionArray.length - 1][1]];
+      if (lastPt) ctx.lineTo((1 - lastPt.x) * width, lastPt.y * height);
     }
     ctx.closePath();
     ctx.fillStyle = fillStyle;
@@ -556,34 +591,48 @@ export function Workspace({
   };
 
   const strokePath = (ctx: CanvasRenderingContext2D, landmarks: any[], connectionArray: any[], color: string, lineWidth: number, width: number, height: number) => {
-    if (!landmarks || !connectionArray) return;
+    if (!landmarks || !connectionArray || connectionArray.length === 0) return;
+    const isTuple = typeof connectionArray[0] !== 'number';
     ctx.beginPath();
     ctx.lineWidth = lineWidth;
     ctx.strokeStyle = color;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
+    let started = false;
     for (let i = 0; i < connectionArray.length; i++) {
-        const pt = landmarks[connectionArray[i][0]];
+        const index = isTuple ? connectionArray[i][0] : connectionArray[i];
+        const pt = landmarks[index];
         if (!pt) continue;
-        if (i === 0) ctx.moveTo((1 - pt.x) * width, pt.y * height);
-        else ctx.lineTo((1 - pt.x) * width, pt.y * height);
+        if (!started) { ctx.moveTo((1 - pt.x) * width, pt.y * height); started = true; }
+        else { ctx.lineTo((1 - pt.x) * width, pt.y * height); }
+    }
+    if (isTuple && connectionArray.length > 0) {
+      const lastPt = landmarks[connectionArray[connectionArray.length - 1][1]];
+      if (lastPt) ctx.lineTo((1 - lastPt.x) * width, lastPt.y * height);
     }
     ctx.stroke();
   };
 
   const strokeDottedPath = (ctx: CanvasRenderingContext2D, landmarks: any[], connectionArray: any[], color: string, dotSize: number, gapSize: number, width: number, height: number) => {
-    if (!landmarks || !connectionArray) return;
+    if (!landmarks || !connectionArray || connectionArray.length === 0) return;
+    const isTuple = typeof connectionArray[0] !== 'number';
     ctx.beginPath();
     ctx.lineWidth = dotSize;
     ctx.strokeStyle = color;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.setLineDash([0, gapSize]);
+    let started = false;
     for (let i = 0; i < connectionArray.length; i++) {
-        const pt = landmarks[connectionArray[i][0]];
+        const index = isTuple ? connectionArray[i][0] : connectionArray[i];
+        const pt = landmarks[index];
         if (!pt) continue;
-        if (i === 0) ctx.moveTo((1 - pt.x) * width, pt.y * height);
-        else ctx.lineTo((1 - pt.x) * width, pt.y * height);
+        if (!started) { ctx.moveTo((1 - pt.x) * width, pt.y * height); started = true; }
+        else { ctx.lineTo((1 - pt.x) * width, pt.y * height); }
+    }
+    if (isTuple && connectionArray.length > 0) {
+      const lastPt = landmarks[connectionArray[connectionArray.length - 1][1]];
+      if (lastPt) ctx.lineTo((1 - lastPt.x) * width, lastPt.y * height);
     }
     ctx.stroke();
     ctx.setLineDash([]);
@@ -1655,13 +1704,18 @@ export function Workspace({
           const offsetX = vMode === "ambos" ? width / 2 : 0;
 
           const ARTE_THEMES = [
-            { name: "Arte Pop", color: "236, 72, 153" },
+            { name: "Pop Clásico", color: "236, 72, 153" },
+            { name: "Pop Puntos", color: "244, 63, 94" },
+            { name: "Pop Líneas", color: "139, 92, 246" },
+            { name: "Pop Bloques", color: "14, 165, 233" },
             { name: "Puntillismo", color: "16, 185, 129" },
             { name: "Óleo", color: "245, 158, 11" },
           ];
           ARTE_THEMES.forEach((theme, idx) => {
-            const btnX = offsetX + rightSideW * (0.25 + idx * 0.25);
-            const btnY = height - 120; // Movidos más arriba
+            const col = idx % 3;
+            const row = Math.floor(idx / 3);
+            const btnX = offsetX + rightSideW * (0.25 + col * 0.25);
+            const btnY = height - 150 + row * 60; // Distribución en 2 filas
             const btnR = 20;
 
             let isHovered = false;
@@ -2528,80 +2582,151 @@ export function Workspace({
             const F_LIRIS = w.FACEMESH_LEFT_IRIS || [];
             const F_RIRIS = w.FACEMESH_RIGHT_IRIS || [];
 
-            // Asignación de género (paleta de colores) basada en las apariciones dinámicas
-            // (appearanceCounterRef.current + fIndex) % 2 asegura colores distintos para múltiples 
+            const F_NOSE = [168, 6, 197, 195, 5, 4];
+            const F_LCHEEK = [116, 123, 147];
+            const F_RCHEEK = [345, 352, 376];
+
+            // Asignación de paletas basada en las apariciones dinámicas
+            // (appearanceCounterRef.current + fIndex) % 3 asegura colores distintos para múltiples 
             // personas simultáneas y que cambien al salir y entrar de cuadro.
-            const themeVariant = (appearanceCounterRef.current + fIndex) % 2;
-            const isFemale = themeVariant === 0;
-            const isMale = !isFemale;
+            const themeVariant = (appearanceCounterRef.current + fIndex) % 3;
             const arteThemeIdx = activeArteThemeRef.current;
 
-            if (arteThemeIdx === 0) {
-              // --- ARTE POP (Ben-Day Dots) ---
-              let baseColor, shadowDot, shadowBg, lipColor, eyeShadowColor;
-              if (isFemale) {
-                  baseColor = '#ffe3e0'; shadowDot = '#ff4757'; shadowBg = '#ff6b81'; lipColor = '#ff0000'; eyeShadowColor = '#1e90ff';
-              } else if (isMale) {
-                  baseColor = '#f5cd79'; shadowDot = '#e15f41'; shadowBg = '#f3a683'; lipColor = '#cf6a87'; eyeShadowColor = null;
-              } else {
-                  baseColor = '#f1dbce'; shadowDot = '#e66767'; shadowBg = '#ea8685'; lipColor = '#e66767'; eyeShadowColor = null;
-              }
+            if (arteThemeIdx >= 0 && arteThemeIdx <= 3) {
+              // =========================================================
+              // ARTE POP - VARIABLES MODIFICABLES MANUALMENTE
+              // Modifica los valores a continuación para cambiar el grosor y estilo
+              // =========================================================
+              const config = {
+                comicOutline: 2,        // Grosor del delineado base (rostro)
+                eyebrowThickness: 3,   // Grosor del sombreado de la ceja
+                eyebrowBorder: 3,      // Grosor del contorno negro de la ceja
+                dotRadius: 4,           // Tamaño del punto de textura Ben-Day
+                dotSpacing: 16,         // Espaciado entre puntos
+                pupilRadius: 0.015,     // Tamaño de la pupila
+                
+                // Vectores faciales - Modifica los índices si deseas cambiar la forma
+                noseVertical: [168, 4],              // Línea recta vertical desde el puente hasta la punta
+                noseHorizontal: [129, 2, 358],       // Línea horizontal ancha bajo la nariz
+                leftCheek: [127, 116, 50],           // Pómulo izquierdo en forma de "L" (desde la oreja hacia adentro y abajo)
+                rightCheek: [356, 345, 280]          // Pómulo derecho en forma de "L"
+              };
+              // =========================================================
 
+              const popStyle = arteThemeIdx === 2 ? 'hatch' : (arteThemeIdx === 3 ? 'warhol' : 'dots');
+              
+              // Paletas aleatorias que se asignan a cada persona en pantalla
+              const popPalettes = [
+                { base: '#ffffff', dot: '#e11d48', lip: '#e11d48', shadow: '#0ea5e9' }, // Paleta 1
+                { base: '#ffffff', dot: '#1e293b', lip: '#cbd5e1', shadow: null },      // Paleta 2
+                { base: '#c8e7f5ff', dot: '#db2777', lip: '#06b6d4', shadow: '#8b5cf6' }  // Paleta 3
+              ];
+              
+              const currentPalette = popPalettes[themeVariant];
+              const baseColor = currentPalette.base;
+              const dotColor = currentPalette.dot;
+              const lipColor = currentPalette.lip;
+              const eyeShadowColor = currentPalette.shadow;
+
+              // 1. Piel base
               fillPath(ctx, face, F_OVAL, baseColor, width, height);
 
-              const rightShadowArea = [ [10,10], [338,338], [297,297], [332,332], [284,284], [251,251], [389,389], [356,356], [454,454], [323,323], [361,361], [288,288], [397,397], [365,365], [379,379], [378,378], [400,400], [377,377], [152,152], [9,9], [8,8], [10,10] ];
-              const popPattern = createHalftonePattern(ctx, shadowDot, shadowBg, 10);
+              // 2. Patrón Ben-Day 
+              const popPattern = createBenDayPattern(ctx, dotColor, null, config.dotRadius, config.dotSpacing, popStyle);
               if (popPattern) {
-                fillPath(ctx, face, rightShadowArea, popPattern, width, height);
-                const chinShadow = [ [152,152], [148,148], [176,176], [149,149], [150,150], [136,136], [172,172], [58,58], [132,132], [93,93], [164,164], [152,152] ];
-                fillPath(ctx, face, chinShadow, popPattern, width, height);
+                ctx.save();
+                fillPath(ctx, face, F_OVAL, popPattern, width, height);
+                ctx.restore();
               }
 
+              // 3. Cejas de doble trazo
               if (eyeShadowColor) {
-                  const leftEyeShadow = [ [33,33], [246,246], [161,161], [160,160], [159,159], [158,158], [157,157], [173,173], [133,133], [155,155], [154,154], [153,153], [145,145], [144,144], [163,163], [7,7], [33,33] ];
-                  fillPath(ctx, face, leftEyeShadow, eyeShadowColor, width, height);
-                  const rightEyeShadow = [ [263,263], [466,466], [388,388], [387,387], [386,386], [385,385], [384,384], [398,398], [362,362], [382,382], [381,381], [380,380], [374,374], [373,373], [390,390], [249,249], [263,263] ];
-                  fillPath(ctx, face, rightEyeShadow, eyeShadowColor, width, height);
-              }
-              
-              strokePath(ctx, face, F_OVAL, '#000', 4, width, height); 
-              fillPath(ctx, face, F_LEYE, '#fff', width, height);
-              fillPath(ctx, face, F_REYE, '#fff', width, height);
-              strokePath(ctx, face, F_LEYE, '#000', isFemale ? 5 : 3, width, height);
-              strokePath(ctx, face, F_REYE, '#000', isFemale ? 5 : 3, width, height);
-              fillPath(ctx, face, F_LIPS, lipColor, width, height);
-              strokePath(ctx, face, F_LIPS, '#000', 3, width, height);
-              fillPath(ctx, face, F_LBRW, '#000', width, height);
-              fillPath(ctx, face, F_RBRW, '#000', width, height);
-              strokePath(ctx, face, F_LBRW, '#000', isMale ? 5 : 2, width, height);
-              strokePath(ctx, face, [[129, 98], [98, 97], [97, 2], [2, 326], [326, 327], [327, 358]], '#000', 3, width, height);
-              
-              if (F_LIRIS.length) {
-                  fillPath(ctx, face, F_LIRIS, isFemale ? '#1e90ff' : '#2ed573', width, height);
-                  fillPath(ctx, face, F_RIRIS, isFemale ? '#1e90ff' : '#2ed573', width, height);
-                  strokePath(ctx, face, F_LIRIS, '#000', 2, width, height);
-                  strokePath(ctx, face, F_RIRIS, '#000', 2, width, height);
-                  const lC = face[468], rC = face[473];
-                  if (lC && rC) {
-                    ctx.beginPath();
-                    ctx.arc((1 - lC.x) * width, lC.y * height, width * 0.015, 0, Math.PI*2);
-                    ctx.arc((1 - rC.x) * width, rC.y * height, width * 0.015, 0, Math.PI*2);
-                    ctx.fillStyle = '#000'; ctx.fill();
-                  }
-              }
-            } else if (arteThemeIdx === 1) {
-              // --- PUNTILLISMO ---
-              let bgBase, dot1, dot2, dot3, lipColor, eyeColor;
-              if (isFemale) {
-                  bgBase = '#fff0f5'; dot1 = '#ff1493'; dot2 = '#00ced1'; dot3 = '#ffd700'; 
-                  lipColor = '#dc143c'; eyeColor = '#191970';
-              } else if (isMale) {
-                  bgBase = '#f5f5dc'; dot1 = '#000080'; dot2 = '#8b0000'; dot3 = '#2e8b57'; 
-                  lipColor = '#8b4513'; eyeColor = '#000000';
+                strokePath(ctx, face, F_LBRW, eyeShadowColor, 18, width, height);
+                strokePath(ctx, face, F_RBRW, eyeShadowColor, 18, width, height);
               } else {
-                  bgBase = '#faf0e6'; dot1 = '#ff8c00'; dot2 = '#4682b4'; dot3 = '#9acd32'; 
-                  lipColor = '#cd5c5c'; eyeColor = '#4682b4';
+                strokePath(ctx, face, F_LBRW, '#000000', 18, width, height);
+                strokePath(ctx, face, F_RBRW, '#000000', 18, width, height);
               }
+
+              // 4. Ojos blancos simples e Iris coloridos
+              fillPath(ctx, face, F_LEYE, '#ffffff', width, height);
+              fillPath(ctx, face, F_REYE, '#ffffff', width, height);
+
+              if (F_LIRIS && F_LIRIS.length) {
+                // Usamos el color de iris de la paleta asignada. Si es paleta 2 (slate), será oscuro.
+                const irisColor = (themeVariant === 0) ? '#0ea5e9' : ((themeVariant === 1) ? '#dc2626' : '#eab308');
+                fillPath(ctx, face, F_LIRIS, irisColor, width, height);
+                fillPath(ctx, face, F_RIRIS, irisColor, width, height);
+              }
+
+              // --- Variantes Estructurales ---
+              const lipVariant = (appearanceCounterRef.current * 3 + fIndex) % 3; 
+              const eyeVariant = (appearanceCounterRef.current * 7 + fIndex) % 2; 
+
+              const INNER_LIPS = [78, 191, 80, 81, 82, 13, 312, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95];
+              const LOWER_LIP = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308, 312, 13, 82, 81, 80, 191];
+
+              let currentLips = F_LIPS;
+
+              // 5. Labios (Múltiples Variantes)
+              if (lipVariant === 0) {
+                // Labios completos/gruesos
+                currentLips = F_LIPS;
+                fillPath(ctx, face, currentLips, lipColor, width, height);
+              } else if (lipVariant === 1) {
+                // Labios delgados (solo área interna)
+                currentLips = INNER_LIPS;
+                fillPath(ctx, face, currentLips, lipColor, width, height);
+              } else {
+                // Hombre / Minimalista: Solo labio inferior blanco
+                currentLips = LOWER_LIP;
+                fillPath(ctx, face, currentLips, '#ffffff', width, height);
+              }
+
+              // 6. Contornos Negros de Cómic
+              // El snippet del usuario multiplica comicOutline por 1.8 como base.
+              const comicOutline = config.comicOutline * 1.8; 
+
+              strokePath(ctx, face, F_OVAL, '#000000', comicOutline * 1.5, width, height);
+              
+              // Trazos internos: nariz y pómulos
+              const noseBridge = [8, 168, 6, 197, 195, 5];
+              strokePath(ctx, face, noseBridge, '#000000', comicOutline * 1.2, width, height);
+              
+              if (eyeVariant === 1) {
+                  // Delineado intenso estilo cómic retro (Ojos más delineados)
+                  strokePath(ctx, face, F_LEYE, '#000000', comicOutline * 2.5, width, height);
+                  strokePath(ctx, face, F_REYE, '#000000', comicOutline * 2.5, width, height);
+              } else {
+                  // Delineado normal
+                  strokePath(ctx, face, F_LEYE, '#000000', comicOutline, width, height);
+                  strokePath(ctx, face, F_REYE, '#000000', comicOutline, width, height);
+              }
+              
+              // Contorno de labios según la variante elegida
+              strokePath(ctx, face, currentLips, '#000000', comicOutline, width, height);
+              strokePath(ctx, face, F_LBRW, '#000000', comicOutline, width, height);
+              strokePath(ctx, face, F_RBRW, '#000000', comicOutline, width, height);
+
+              strokePath(ctx, face, F_NOSE, '#000000', comicOutline * 0.8, width, height);
+              strokePath(ctx, face, F_LCHEEK, '#000000', comicOutline * 0.6, width, height);
+              strokePath(ctx, face, F_RCHEEK, '#000000', comicOutline * 0.6, width, height);
+
+              // Párpado superior dramático
+              const upperEyeLeft = [157, 158, 159, 160, 161];
+              const upperEyeRight = [384, 385, 386, 387, 388];
+              strokePath(ctx, face, upperEyeLeft, '#000000', comicOutline * 2, width, height);
+              strokePath(ctx, face, upperEyeRight, '#000000', comicOutline * 2, width, height);
+            } else if (arteThemeIdx === 4) {
+              // --- PUNTILLISMO ---
+              const pointillismPalettes = [
+                { bg: '#fff0f5', d1: '#ff1493', d2: '#00ced1', d3: '#ffd700', lip: '#dc143c', eye: '#191970' }, // Paleta 1
+                { bg: '#f5f5dc', d1: '#000080', d2: '#8b0000', d3: '#2e8b57', lip: '#8b4513', eye: '#000000' }, // Paleta 2
+                { bg: '#faf0e6', d1: '#ff8c00', d2: '#4682b4', d3: '#9acd32', lip: '#cd5c5c', eye: '#4682b4' }  // Paleta 3
+              ];
+              
+              const p = pointillismPalettes[themeVariant];
+              let bgBase = p.bg, dot1 = p.d1, dot2 = p.d2, dot3 = p.d3, lipColor = p.lip, eyeColor = p.eye;
 
               const mainPattern = createPointillismPattern(ctx, dot1, dot2, dot3, bgBase);
               if (mainPattern) fillPath(ctx, face, F_OVAL, mainPattern, width, height);
@@ -2619,6 +2744,11 @@ export function Workspace({
               const noseLine = [[168, 6], [6, 197], [197, 195], [195, 5], [5, 4]];
               strokeDottedPath(ctx, face, noseLine, dot2, 4, 8, width, height);
 
+              // Trazos añadidos por instrucción manual
+              strokePath(ctx, face, F_NOSE, '#000000', 4, width, height);
+              strokePath(ctx, face, F_LCHEEK, '#000000', 4 * 0.8, width, height);
+              strokePath(ctx, face, F_RCHEEK, '#000000', 4 * 0.8, width, height);
+
               if (F_LIRIS.length) {
                   const irisPattern = createPointillismPattern(ctx, eyeColor, '#000', dot1, 'transparent');
                   if (irisPattern) {
@@ -2626,16 +2756,15 @@ export function Workspace({
                       fillPath(ctx, face, F_RIRIS, irisPattern, width, height);
                   }
               }
-            } else if (arteThemeIdx === 2) {
+            } else if (arteThemeIdx === 5) {
               // --- ÓLEO ---
-              let palette;
-              if (isFemale) {
-                  palette = ['#ff007f', '#00e5ff', '#ffea00', '#ff5e00', '#d500f9', '#ffffff'];
-              } else if (isMale) {
-                  palette = ['#ff3d00', '#2962ff', '#d50000', '#00c853', '#ffab00', '#3e2723'];
-              } else {
-                  palette = ['#ff6d00', '#00bfa5', '#ffd600', '#c51162'];
-              }
+              const oilPalettes = [
+                ['#ff007f', '#00e5ff', '#ffea00', '#ff5e00', '#d500f9', '#ffffff'], // Paleta 1
+                ['#ff3d00', '#2962ff', '#d50000', '#00c853', '#ffab00', '#3e2723'], // Paleta 2
+                ['#ff6d00', '#00bfa5', '#ffd600', '#c51162']                        // Paleta 3
+              ];
+              
+              const palette = oilPalettes[themeVariant];
 
               fillPath(ctx, face, F_OVAL, '#212121', width, height); 
 
@@ -2663,6 +2792,12 @@ export function Workspace({
                   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
                   ctx.stroke();
               }
+              
+              // Trazos añadidos por instrucción manual
+              strokePath(ctx, face, F_NOSE, 'rgba(0, 0, 0, 0.3)', 4, width, height);
+              strokePath(ctx, face, F_LCHEEK, 'rgba(0, 0, 0, 0.2)', 3, width, height);
+              strokePath(ctx, face, F_RCHEEK, 'rgba(0, 0, 0, 0.2)', 3, width, height);
+              
               ctx.restore();
             }
           }
