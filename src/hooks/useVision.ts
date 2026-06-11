@@ -11,10 +11,13 @@ import { ModuleType } from "../types";
  * Consolida el flujo en un único lugar para reducir consumo de CPU, evitar re-inicializaciones de cámara
  * que asusten al usuario o requieran múltiples permisos, y facilitar auditorías sistemáticas de IA.
  */
-export function useVision(activeModule: ModuleType) {
+export function useVision(activeModule: ModuleType, selectedDeviceId?: string) {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
+  // Lista de dispositivos de video disponibles
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
 
   // Estados reactivos que exponen las últimas lecturas calculadas por las redes neuronales de MediaPipe
   const [faceLandmarks, setFaceLandmarks] = useState<any>(null);
@@ -37,6 +40,15 @@ export function useVision(activeModule: ModuleType) {
   useEffect(() => {
     activeModuleRef.current = activeModule;
   }, [activeModule]);
+
+  // Cargar lista de cámaras
+  useEffect(() => {
+    navigator.mediaDevices.enumerateDevices()
+      .then(devices => {
+        setVideoDevices(devices.filter(d => d.kind === 'videoinput'));
+      })
+      .catch(err => console.warn("Error listando cámaras:", err));
+  }, []);
 
   /**
    * Crea un elemento de video fantasma en el DOM de forma perezosa
@@ -102,9 +114,10 @@ export function useVision(activeModule: ModuleType) {
 
       const FaceMeshClass = (window as any).FaceMesh;
       const HandsClass = (window as any).Hands;
-      const CameraClass = (window as any).Camera;
+      // Ya no necesitamos CameraClass porque lo controlamos manualmente para poder elegir dispositivo
+      // const CameraClass = (window as any).Camera;
 
-      if (!FaceMeshClass || !HandsClass || !CameraClass) {
+      if (!FaceMeshClass || !HandsClass) {
         throw new Error(
           "Las dependencias del motor MediaPipe no están cargadas en el objeto global (window) después de 10 segundos."
         );
@@ -180,9 +193,32 @@ export function useVision(activeModule: ModuleType) {
       }
 
       console.log("[useVision] Conectando hardware de cámara...");
-      const camera = new CameraClass(videoElement, {
-        onFrame: async () => {
-          // Bucle inteligente: Solo envía frames a los modelos relevantes para ahorrar procesador de tu CPU
+      
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : { facingMode: 'user' })
+        }
+      });
+      
+      videoElement.srcObject = stream;
+      
+      await new Promise((resolve) => {
+        videoElement.onloadedmetadata = () => {
+          resolve(true);
+        };
+      });
+      
+      videoElement.play();
+
+      let isRunning = true;
+      let animationFrameId: number;
+
+      const cameraLoop = async () => {
+        if (!isRunning) return;
+        
+        if (videoElement.readyState >= 2) {
           const currentMode = activeModuleRef.current;
           if (currentMode === "FILTERS") {
             if (faceMeshRef.current) await faceMeshRef.current.send({ image: videoElement });
@@ -195,13 +231,22 @@ export function useVision(activeModule: ModuleType) {
             if (handsRef.current) await handsRef.current.send({ image: videoElement });
             if (faceMeshRef.current) await faceMeshRef.current.send({ image: videoElement });
           }
-        },
-        width: 640,
-        height: 480,
-      });
+        }
+        
+        animationFrameId = requestAnimationFrame(cameraLoop);
+      };
 
-      cameraInstanceRef.current = camera;
-      await camera.start();
+      cameraLoop();
+
+      cameraInstanceRef.current = {
+        stop: () => {
+          isRunning = false;
+          if (animationFrameId) cancelAnimationFrame(animationFrameId);
+          stream.getTracks().forEach(track => track.stop());
+          videoElement.srcObject = null;
+        }
+      };
+
       console.log("[useVision] Cámara arrancada con éxito.");
 
       setIsLoaded(true);
@@ -213,7 +258,7 @@ export function useVision(activeModule: ModuleType) {
     }
   };
 
-  // Re-evaluar ciclo de hardware según el módulo seleccionado por el usuario
+  // Re-evaluar ciclo de hardware según el módulo seleccionado por el usuario o cámara
   useEffect(() => {
     startSensors();
 
@@ -224,7 +269,7 @@ export function useVision(activeModule: ModuleType) {
         stopSensors();
       }
     };
-  }, [activeModule]);
+  }, [activeModule, selectedDeviceId]);
 
   // Apagar sensores al destruir por completo la aplicación
   useEffect(() => {
@@ -247,5 +292,6 @@ export function useVision(activeModule: ModuleType) {
     handLandmarks,
     videoElement: videoElementState,   // Estado reactivo en vez de ref cruda
     detectionConfidence,
+    videoDevices // Exponer lista de dispositivos
   };
 }

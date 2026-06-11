@@ -9,7 +9,7 @@ import { playPopSound, playSuccessSound, playElectricSound } from "../utils/audi
 import { FiltersModule } from "./FiltersModule";
 import { EmotionsModule } from "./EmotionsModule";
 import { BubblesModule } from "./BubblesModule";
-import { ArrowLeft, RefreshCw, Smartphone, EyeOff, ShieldAlert } from "lucide-react";
+import { ArrowLeft, RefreshCw, Smartphone, EyeOff, ShieldAlert, Camera } from "lucide-react";
 
 const CYBER_THEMES = [
   { name: "Alerta Roja", mask: '255, 0, 50', halo1: '0, 255, 255', halo2: '255, 200, 0' },
@@ -5214,9 +5214,27 @@ export function Workspace({
         )}
 
         {/* Tarjeta del Visor Canvas */}
-        <div className="relative w-full h-full rounded-lg overflow-hidden border border-[#2A2A2C] shadow-2xl bg-[#0A0A0B]">
+        <div className="relative w-full h-full rounded-lg overflow-hidden border border-[#2A2A2C] shadow-2xl bg-[#0A0A0B] group">
           
           <canvas ref={canvasRef} className="w-full h-full object-cover" id="sensor-viewport" />
+
+          {/* Botón Flotante para Tomar Foto */}
+          <button
+            onClick={() => {
+              if (canvasRef.current) {
+                const link = document.createElement("a");
+                link.download = `captura-vision-${Date.now()}.png`;
+                link.href = canvasRef.current.toDataURL("image/png");
+                link.click();
+                playSuccessSound();
+              }
+            }}
+            className="absolute top-4 right-4 bg-[#1e293b]/80 hover:bg-[#3b82f6]/80 backdrop-blur-md text-white border border-[#334155] px-3 py-2 rounded-lg shadow-lg flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 cursor-pointer z-50 hover:scale-105 active:scale-95"
+            title="Tomar y Guardar Foto"
+          >
+            <Camera className="w-5 h-5 text-blue-400 group-hover:text-white transition-colors" />
+            <span className="text-xs font-mono font-bold tracking-wider hidden sm:inline-block">CAPTURAR</span>
+          </button>
 
           {/* Overlay de Game Over en tiempos del Módulo 03 */}
           {showGameOver && activeModule === "BUBBLES" && electricWinState === "playing" && (

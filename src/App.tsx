@@ -23,6 +23,7 @@ export default function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [viewMode, setViewMode] = useState<"ingenieria" | "comercial" | "ambos">("ambos");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -61,7 +62,8 @@ export default function App() {
     handLandmarks,
     videoElement,
     detectionConfidence,
-  } = useVision("FILTERS");
+    videoDevices
+  } = useVision("FILTERS", selectedDeviceId);
 
   return (
     /* Contenedor raíz con borde azul demo */
@@ -142,6 +144,31 @@ export default function App() {
           <div className="hidden md:block text-[10px] font-mono text-[#636366]">
             Soporta: Plexus · CyberMask · Fuego Dinámico
           </div>
+
+          {/* Selector de Cámara */}
+          {videoDevices && videoDevices.length > 0 && (
+            <div className="relative flex items-center bg-[#1e293b] border border-[#334155] rounded-md px-2 py-1 ml-2">
+              <select
+                className="bg-transparent text-[10px] font-mono text-blue-400 outline-none appearance-none cursor-pointer pr-4"
+                value={selectedDeviceId}
+                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                title="Seleccionar Cámara"
+              >
+                <option value="">Cámara por Defecto</option>
+                {videoDevices.map((device, idx) => (
+                  <option key={device.deviceId || idx} value={device.deviceId}>
+                    {device.label || `Cámara ${idx + 1}`}
+                  </option>
+                ))}
+              </select>
+              {/* Custom Dropdown Arrow */}
+              <div className="absolute right-2 pointer-events-none text-[#94a3b8]">
+                <svg width="8" height="5" viewBox="0 0 8 5" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 1L4 4L7 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
